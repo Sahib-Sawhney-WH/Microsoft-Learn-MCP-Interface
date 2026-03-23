@@ -209,7 +209,7 @@ pre:hover .copy-btn { opacity:1; } .copy-btn:hover { color:var(--green); border-
     <div class="sidebar-section"><div class="sidebar-label">Tools</div><div id="toolList" style="font-size:10px;color:var(--text-muted);">Connect to discover</div></div>
     <div class="sidebar-section" style="flex:1;overflow-y:auto;"><div class="sidebar-label">History</div><div id="historyList" style="font-size:10px;color:var(--text-muted);">No history</div></div>
     <div class="sidebar-section"><div class="sidebar-label">Bookmarks</div><div id="bookmarkList" style="font-size:10px;color:var(--text-muted);">None</div></div>
-    <div class="sidebar-footer">proxy: not configured</div>
+    <div class="sidebar-footer">proxy: sahibiscool.workers.dev</div>
   </div>
 
   <div class="content">
@@ -259,7 +259,7 @@ pre:hover .copy-btn { opacity:1; } .copy-btn:hover { color:var(--green); border-
 <div class="toast" id="toast"></div>
 
 <script>
-const PROXY = "YOUR_WORKER_URL_HERE";
+const PROXY = "https://mcp-proxy.sahibiscool.workers.dev";
 const DOC_CACHE_MAX = 50;
 let sessionId = null, rpcId = 0, tools = [], activeTool = "microsoft_docs_search";
 let tabs = [{ id:"search", title:"Search", type:"search" }], activeTabId = "search", tabCounter = 0;
@@ -621,12 +621,38 @@ function renderResults(items, query) {
   lastSearchHtml = el.innerHTML;
 }
 
+// Check if a URL can be fetched via microsoft_docs_fetch (HTML docs only)
+function isFetchableDoc(url) {
+  try {
+    const u = new URL(url);
+    // go.microsoft.com/fwlink redirects - could be PDFs, downloads, anything
+    if (u.hostname === "go.microsoft.com") return false;
+    // aka.ms short links - same problem
+    if (u.hostname === "aka.ms") return false;
+    // Binary file extensions
+    if (/\.(pdf|docx|xlsx|pptx|zip|tar|gz|exe|msi|dmg|pkg|iso|csv|json|xml|yaml|yml)$/i.test(u.pathname)) return false;
+    // GitHub repos, not docs
+    if (u.hostname === "github.com") return false;
+    // Only fetch from learn.microsoft.com and docs.microsoft.com
+    if (u.hostname === "learn.microsoft.com" || u.hostname === "docs.microsoft.com") return true;
+    // Other microsoft.com subdomains might work but are risky
+    if (u.hostname.endsWith(".microsoft.com")) return true;
+    return false;
+  } catch { return false; }
+}
+
 async function openDoc(url, title) {
+  // If URL isn't a fetchable doc page, open externally
+  if (!isFetchableDoc(url)) { window.open(url, "_blank"); toast("Opened externally"); return; }
   if (docCache.has(url)) { const c = docCache.get(url); showDoc(c.markdown, c.title||title, url); return; }
   document.getElementById("results").innerHTML = '<div class="empty-state"><div class="spinner"></div> Fetching...</div>';
   try {
     const result = await rpcCall("tools/call", { name:"microsoft_docs_fetch", arguments:{ url } });
     let md = ""; for (const b of (result?.result?.content||[])) { if (b.type==="text") { try { const o=JSON.parse(b.text); md=o.content||o.markdown||o.text||b.text; } catch { md=b.text; } } }
+    // Detect if we got binary garbage back (PDF served from a .microsoft.com URL without .pdf extension)
+    if (md.startsWith("%PDF") || md.includes("\x00") || /^[^\x20-\x7E\r\n\t]{20}/.test(md.slice(0,100))) {
+      window.open(url, "_blank"); toast("Binary file - opened externally"); return;
+    }
     const titleMatch = md.match(/^#\s+(.+)$/m);
     const docTitle = titleMatch ? titleMatch[1] : title;
     docCache.set(url, { markdown:md, title:docTitle }); pruneDocCache(); addHistory(url, docTitle); showDoc(md, docTitle, url);
@@ -721,7 +747,7 @@ function renderMarkdown(md) {
     .replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^# (.+)$/gm,'<h1>$1</h1>')
     .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>')
     .replace(/`([^`]+)`/g,'<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,(_,t,r)=>{const u=resolveUrl(r);return`<a href="${u}" onclick="event.preventDefault();openDoc('${escA(u)}','doc')">${t}</a>`;});
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,(_,t,r)=>{const u=resolveUrl(r);if(isFetchableDoc(u))return`<a href="${u}" onclick="event.preventDefault();openDoc('${escA(u)}','doc')">${t}</a>`;return`<a href="${u}" target="_blank" rel="noopener">${t}</a>`;});
   // Blockquotes: merge consecutive > lines into one blockquote
   h = h.replace(/(^> .+$\n?)+/gm, (block) => {
     const inner = block.replace(/^> /gm, "").trim().replace(/\n/g, "<br>");
