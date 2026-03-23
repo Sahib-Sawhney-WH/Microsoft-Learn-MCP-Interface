@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LEARN:MCP</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e14; --surface: #111820; --surface-2: #1a2332; --surface-3: #212d3b;
+  --border: #1e2a3a; --border-active: #2d4a6f; --text: #c5cdd8; --text-muted: #5c6a7a;
+  --text-bright: #e8edf3; --accent: #3b82f6; --accent-dim: #1e3a5f;
+  --green: #34d399; --green-dim: #0d3328; --yellow: #fbbf24; --red: #f87171; --orange: #fb923c;
+  --purple: #a78bfa;
+}
+body.light {
+  --bg: #f5f7fa; --surface: #ffffff; --surface-2: #eef1f6; --surface-3: #e2e6ed;
+  --border: #d1d5db; --border-active: #93a3b8; --text: #374151; --text-muted: #6b7280;
+  --text-bright: #111827; --accent: #2563eb; --accent-dim: #dbeafe;
+  --green: #059669; --green-dim: #d1fae5; --yellow: #d97706; --red: #dc2626; --orange: #ea580c;
+  --purple: #7c3aed;
+}
+body.light .copy-btn { background:var(--surface-2); }
+body.light pre:hover .copy-btn { opacity:1; }
+body.light .chat-msg.user { background:#dbeafe; border-color:#93b4f4; color:#1e3a5f; }
+body.light .summary-card { background:linear-gradient(135deg, #f3f0ff, #ffffff); }
+body.light mark { background:#fef08a; color:#713f12; }
+body.light .doc-content pre { background:#f8fafc; border-color:#d1d5db; color:#166534; }
+body.light .doc-content pre code { color:#166534; }
+body.light .doc-content code { background:#f1f5f9; color:#9a3412; }
+body.light .doc-content blockquote { background:#f8fafc; border-left-color:#2563eb; }
+body.light .result-card pre { background:#f8fafc; color:#166534; }
+body.light .result-card pre code { color:#166534; }
+body.light .chat-msg .snippet { background:#f8fafc; border-color:#d1d5db; }
+body.light .chat-msg .snippet mark { background:#fef08a; color:#713f12; }
+body.light .log-entry { border-bottom-color:#e5e7eb; }
+body.light .tab.active { background:var(--bg); border-bottom-color:var(--accent); }
+body.light img { border-color:#d1d5db; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'IBM Plex Sans',sans-serif; background:var(--bg); color:var(--text); height:100vh; overflow:hidden; display:flex; flex-direction:column; }
+.mono { font-family:'JetBrains Mono',monospace; }
+::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+
+.header { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; }
+.header-left { display:flex; align-items:center; gap:12px; }
+.logo { font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; color:var(--accent); letter-spacing:1px; }
+.logo span { color:var(--text-muted); font-weight:400; font-size:11px; }
+.header-right { display:flex; align-items:center; gap:8px; }
+.status-dot { width:7px; height:7px; border-radius:50%; background:var(--red); transition:background 0.3s; }
+.status-dot.connected { background:var(--green); box-shadow:0 0 6px var(--green); }
+.status-text { font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; }
+.hdr-btn { padding:4px 10px; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; font-size:10px; cursor:pointer; transition:all 0.15s; }
+.hdr-btn:hover { border-color:var(--accent); color:var(--text-bright); }
+.hdr-btn.active { border-color:var(--accent); color:var(--accent); background:var(--accent-dim); }
+.hdr-btn .kbd { background:var(--surface-3); padding:1px 4px; border-radius:2px; margin-left:4px; font-size:9px; }
+
+.tab-bar { display:flex; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; overflow-x:auto; }
+.tab { display:flex; align-items:center; gap:6px; padding:6px 14px; font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-muted); cursor:pointer; border-right:1px solid var(--border); white-space:nowrap; max-width:200px; transition:all 0.15s; }
+.tab:hover { background:var(--surface-2); color:var(--text); }
+.tab.active { background:var(--bg); color:var(--accent); border-bottom:2px solid var(--accent); }
+.tab-title { overflow:hidden; text-overflow:ellipsis; }
+.tab-close { font-size:14px; opacity:0.4; } .tab-close:hover { opacity:1; color:var(--red); }
+.tab-new { padding:6px 10px; color:var(--text-muted); cursor:pointer; font-size:14px; } .tab-new:hover { color:var(--accent); }
+
+.main { display:flex; flex:1; overflow:hidden; }
+.sidebar { width:220px; border-right:1px solid var(--border); background:var(--surface); display:flex; flex-direction:column; flex-shrink:0; }
+.content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.sidebar-section { padding:8px 10px; border-bottom:1px solid var(--border); }
+.sidebar-label { font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:1.2px; color:var(--text-muted); margin-bottom:6px; }
+.tool-list { flex:1; overflow-y:auto; padding:4px 8px; }
+.tool-item { padding:5px 8px; border-radius:4px; cursor:pointer; margin-bottom:2px; transition:background 0.15s; border:1px solid transparent; }
+.tool-item:hover { background:var(--surface-2); }
+.tool-item.active { background:var(--accent-dim); border-color:var(--accent); }
+.tool-name { font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:500; color:var(--text-bright); }
+.sidebar-footer { padding:6px 10px; border-top:1px solid var(--border); font-size:9px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; }
+
+.toc-panel { width:200px; border-left:1px solid var(--border); background:var(--surface); overflow-y:auto; flex-shrink:0; display:none; }
+.toc-panel.visible { display:flex; flex-direction:column; }
+.toc-header { padding:8px 10px; border-bottom:1px solid var(--border); font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:1.2px; color:var(--text-muted); display:flex; justify-content:space-between; }
+.toc-close { cursor:pointer; font-size:13px; opacity:0.5; } .toc-close:hover { opacity:1; }
+.toc-list { padding:6px; flex:1; overflow-y:auto; }
+.toc-item { padding:3px 6px; font-size:10px; color:var(--text-muted); cursor:pointer; border-radius:3px; transition:all 0.15s; line-height:1.4; }
+.toc-item:hover { color:var(--text-bright); background:var(--surface-2); }
+.toc-item.h2 { padding-left:6px; } .toc-item.h3 { padding-left:16px; font-size:9px; }
+
+.search-bar { padding:10px 14px; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; }
+.search-row { display:flex; gap:6px; align-items:stretch; }
+.search-input { flex:1; background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:7px 10px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-bright); outline:none; transition:border-color 0.2s; }
+.search-input:focus { border-color:var(--accent); }
+.search-input::placeholder { color:var(--text-muted); }
+.search-btn { padding:7px 14px; background:var(--accent); color:#fff; border:none; border-radius:5px; font-weight:600; font-size:11px; cursor:pointer; }
+.search-btn:disabled { opacity:0.4; cursor:not-allowed; }
+.connect-btn { padding:7px 10px; background:var(--green-dim); color:var(--green); border:1px solid var(--green); border-radius:5px; font-family:'JetBrains Mono',monospace; font-weight:500; font-size:10px; cursor:pointer; }
+.connect-btn:hover { background:var(--green); color:var(--bg); }
+
+.results-area { flex:1; overflow-y:auto; padding:14px; }
+.result-card { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:10px 14px; margin-bottom:6px; cursor:pointer; transition:all 0.15s; }
+.result-card:hover { border-color:var(--border-active); transform:translateX(2px); }
+.result-card.focused { border-color:var(--accent); background:var(--accent-dim); }
+.result-title { font-weight:600; font-size:12px; color:var(--accent); margin-bottom:3px; }
+.result-desc { font-size:11px; color:var(--text); line-height:1.5; margin-bottom:4px; }
+.result-meta { font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--text-muted); }
+
+.doc-viewer { padding:16px; overflow-y:auto; flex:1; }
+.doc-toolbar { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+.doc-btn { display:inline-flex; align-items:center; gap:3px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-muted); cursor:pointer; padding:3px 8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); transition:all 0.15s; }
+.doc-btn:hover { border-color:var(--accent); color:var(--accent); }
+.doc-content { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:18px 22px; line-height:1.7; font-size:13px; }
+.doc-content h1 { font-size:19px; color:var(--text-bright); margin:0 0 12px 0; font-weight:700; }
+.doc-content h2 { font-size:15px; color:var(--text-bright); margin:18px 0 8px 0; font-weight:600; border-bottom:1px solid var(--border); padding-bottom:4px; scroll-margin-top:16px; }
+.doc-content h3 { font-size:13px; color:var(--text-bright); margin:14px 0 6px 0; font-weight:600; scroll-margin-top:16px; }
+.doc-content p { margin:0 0 8px 0; }
+.doc-content pre { background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:10px 12px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11px; margin:8px 0; color:var(--green); position:relative; }
+.doc-content code { font-family:'JetBrains Mono',monospace; font-size:11px; background:var(--surface-2); padding:1px 4px; border-radius:3px; color:var(--orange); }
+.doc-content pre code { background:none; padding:0; color:var(--green); }
+.doc-content a { color:var(--accent); text-decoration:none; } .doc-content a:hover { text-decoration:underline; }
+.doc-content ul,.doc-content ol { margin:4px 0 8px 18px; } .doc-content li { margin-bottom:2px; }
+.doc-content strong { color:var(--text-bright); }
+.doc-content blockquote { border-left:3px solid var(--accent); padding:4px 12px; margin:8px 0; color:var(--text-muted); background:var(--surface-2); border-radius:0 5px 5px 0; }
+.doc-content img { max-width:100%; border-radius:5px; margin:8px 0; border:1px solid var(--border); }
+.doc-content table { width:100%; border-collapse:collapse; margin:8px 0; font-size:12px; }
+.doc-content th { background:var(--surface-2); font-weight:600; color:var(--text-bright); text-align:left; padding:6px 10px; border:1px solid var(--border); }
+.doc-content td { padding:5px 10px; border:1px solid var(--border); }
+.doc-content tr:nth-child(even) { background:var(--surface-2); }
+.copy-btn { position:absolute; top:4px; right:4px; padding:2px 6px; background:var(--surface-2); border:1px solid var(--border); border-radius:3px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; font-size:9px; cursor:pointer; opacity:0; }
+pre:hover .copy-btn { opacity:1; } .copy-btn:hover { color:var(--green); border-color:var(--green); }
+
+/* ===== Chat Panel ===== */
+.chat-panel { width:320px; border-left:1px solid var(--border); background:var(--surface); display:none; flex-direction:column; flex-shrink:0; }
+.chat-panel.visible { display:flex; }
+.chat-header { padding:8px 12px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.chat-header-title { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:var(--purple); }
+.chat-header-badge { font-size:8px; padding:2px 6px; border-radius:3px; background:var(--surface-3); color:var(--text-muted); font-family:'JetBrains Mono',monospace; }
+.chat-close { cursor:pointer; font-size:14px; color:var(--text-muted); } .chat-close:hover { color:var(--text-bright); }
+.chat-messages { flex:1; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:8px; }
+.chat-msg { padding:8px 10px; border-radius:6px; font-size:11px; line-height:1.5; max-width:95%; animation:fadeIn 0.2s; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+.chat-msg.system { background:var(--surface-2); border:1px solid var(--border); color:var(--text); align-self:flex-start; }
+.chat-msg.user { background:var(--accent-dim); border:1px solid var(--accent); color:var(--text-bright); align-self:flex-end; }
+.chat-msg.bot { background:var(--surface-2); border:1px solid var(--border); color:var(--text); align-self:flex-start; }
+.chat-msg h4 { font-size:10px; color:var(--purple); margin-bottom:4px; font-family:'JetBrains Mono',monospace; }
+.chat-msg .snippet { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:6px 8px; margin:6px 0; font-size:10px; line-height:1.5; color:var(--text); font-family:'IBM Plex Sans',sans-serif; }
+.chat-msg .snippet mark { background:var(--accent-dim); color:var(--accent); padding:0 2px; border-radius:2px; }
+.chat-msg .confidence { font-size:9px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; margin-top:4px; }
+.chat-chips { padding:8px 10px; display:flex; flex-wrap:wrap; gap:4px; border-top:1px solid var(--border); }
+.chat-chip { padding:3px 8px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; font-size:9px; color:var(--text-muted); cursor:pointer; font-family:'JetBrains Mono',monospace; transition:all 0.15s; }
+.chat-chip:hover { border-color:var(--purple); color:var(--purple); }
+.chat-input-row { padding:8px 10px; border-top:1px solid var(--border); display:flex; gap:6px; }
+.chat-input { flex:1; background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:7px 10px; font-size:11px; color:var(--text-bright); outline:none; font-family:'IBM Plex Sans',sans-serif; }
+.chat-input:focus { border-color:var(--purple); }
+.chat-input::placeholder { color:var(--text-muted); }
+.chat-send { padding:7px 12px; background:var(--purple); color:#fff; border:none; border-radius:5px; font-size:10px; font-weight:600; cursor:pointer; font-family:'JetBrains Mono',monospace; }
+
+/* Summary Card */
+.summary-card { background:linear-gradient(135deg, var(--surface-2), var(--surface)); border:1px solid var(--purple); border-radius:6px; padding:10px 12px; }
+.summary-card h4 { color:var(--purple); font-size:10px; margin-bottom:6px; font-family:'JetBrains Mono',monospace; letter-spacing:0.5px; }
+.summary-card .summary-text { font-size:11px; line-height:1.6; color:var(--text); }
+.summary-card .summary-text li { margin-bottom:3px; }
+.summary-card .summary-stats { margin-top:6px; font-size:9px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; display:flex; gap:10px; }
+
+.palette-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:100; display:none; align-items:flex-start; justify-content:center; padding-top:15vh; }
+.palette-overlay.open { display:flex; }
+.palette { width:520px; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,0.5); overflow:hidden; }
+.palette-input { width:100%; padding:14px 18px; background:transparent; border:none; border-bottom:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:14px; color:var(--text-bright); outline:none; }
+.palette-input::placeholder { color:var(--text-muted); }
+.palette-results { max-height:320px; overflow-y:auto; padding:6px; }
+.palette-item { padding:8px 14px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background 0.1s; }
+.palette-item:hover,.palette-item.focused { background:var(--accent-dim); }
+.palette-icon { font-size:14px; width:20px; text-align:center; }
+.palette-text { flex:1; font-size:12px; color:var(--text-bright); }
+.palette-hint { font-size:10px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; }
+
+.log-toggle { padding:5px 14px; border-top:1px solid var(--border); background:var(--surface); font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.log-panel { max-height:0; overflow:hidden; transition:max-height 0.3s; background:var(--bg); }
+.log-panel.open { max-height:180px; overflow-y:auto; }
+.log-entry { padding:2px 14px; font-family:'JetBrains Mono',monospace; font-size:9px; line-height:1.5; border-bottom:1px solid var(--border); }
+.log-entry .ts { color:var(--text-muted); } .log-entry .dir-out { color:var(--orange); }
+.log-entry .dir-in { color:var(--green); } .log-entry .err { color:var(--red); }
+.empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-muted); gap:8px; }
+.empty-state .icon { font-size:36px; opacity:0.3; } .empty-state p { font-size:12px; }
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.6s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.toast { position:fixed; bottom:20px; right:20px; padding:8px 16px; background:var(--surface-2); border:1px solid var(--green); border-radius:6px; color:var(--green); font-family:'JetBrains Mono',monospace; font-size:11px; z-index:200; opacity:0; transform:translateY(10px); transition:all 0.3s; pointer-events:none; }
+.toast.show { opacity:1; transform:translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left"><div class="logo">LEARN:MCP <span>// zero-llm docs browser</span></div></div>
+  <div class="header-right">
+    <button class="hdr-btn" onclick="toggleTheme()" id="themeBtn">☀</button>
+    <button class="hdr-btn" onclick="toggleChat()" id="chatToggle">ASK<span class="kbd">⌘J</span></button>
+    <button class="hdr-btn" onclick="toggleToc()">TOC</button>
+    <button class="hdr-btn" onclick="openPalette()">CMD<span class="kbd">⌘K</span></button>
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-text" id="statusText">disconnected</span>
+  </div>
+</div>
+
+<div class="tab-bar" id="tabBar">
+  <div class="tab active" data-tab="search" onclick="switchTab('search')"><span class="tab-title">Search</span></div>
+  <div class="tab-new" onclick="newTab()">+</div>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-section"><div class="sidebar-label">Tools</div><div id="toolList" style="font-size:10px;color:var(--text-muted);">Connect to discover</div></div>
+    <div class="sidebar-section" style="flex:1;overflow-y:auto;"><div class="sidebar-label">History</div><div id="historyList" style="font-size:10px;color:var(--text-muted);">No history</div></div>
+    <div class="sidebar-section"><div class="sidebar-label">Bookmarks</div><div id="bookmarkList" style="font-size:10px;color:var(--text-muted);">None</div></div>
+    <div class="sidebar-footer">proxy: not configured</div>
+  </div>
+
+  <div class="content">
+    <div class="search-bar">
+      <div class="search-row">
+        <button class="connect-btn" id="connectBtn" onclick="initSession()">INIT</button>
+        <input class="search-input" id="queryInput" placeholder="Search Microsoft Learn... ( / )" onkeydown="handleSearchKey(event)">
+        <button class="search-btn" id="searchBtn" onclick="doSearch()" disabled>Search</button>
+      </div>
+    </div>
+    <div style="display:flex;flex:1;overflow:hidden;">
+      <div class="results-area" id="results">
+        <div class="empty-state"><div class="icon">⚡</div><p>INIT to connect, then search</p>
+        <p style="font-size:10px;" class="mono">⌘K cmd &nbsp; ⌘J ask &nbsp; / search &nbsp; ↑↓ nav</p></div>
+      </div>
+      <div class="toc-panel" id="tocPanel">
+        <div class="toc-header">Contents <span class="toc-close" onclick="toggleToc()">×</span></div>
+        <div class="toc-list" id="tocList"></div>
+      </div>
+      <!-- Chat Panel -->
+      <div class="chat-panel" id="chatPanel">
+        <div class="chat-header">
+          <div><span class="chat-header-title">ASK DOC</span> <span class="chat-header-badge">EXTRACTIVE NLP</span></div>
+          <span class="chat-close" onclick="toggleChat()">×</span>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-msg system">Open a doc, and I'll auto-summarize it. Then ask me anything about it - I'll find the most relevant section. <br><br><strong>No LLM. Pure TF-IDF + BM25.</strong></div>
+        </div>
+        <div class="chat-chips" id="chatChips"></div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chatInput" placeholder="Ask about this doc..." onkeydown="if(event.key==='Enter')askQuestion()">
+          <button class="chat-send" onclick="askQuestion()">ASK</button>
+        </div>
+      </div>
+    </div>
+    <div class="log-toggle" onclick="toggleLog()"><span id="logArrow">▶</span> JSON-RPC <span id="logCount" style="color:var(--accent);">0</span></div>
+    <div class="log-panel" id="logPanel"></div>
+  </div>
+</div>
+
+<div class="palette-overlay" id="paletteOverlay" onclick="if(event.target===this)closePalette()">
+  <div class="palette">
+    <input class="palette-input" id="paletteInput" placeholder="Search commands, docs, history..." oninput="filterPalette()" onkeydown="handlePaletteKey(event)">
+    <div class="palette-results" id="paletteResults"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const PROXY = "YOUR_WORKER_URL_HERE";
+const DOC_CACHE_MAX = 50;
+let sessionId = null, rpcId = 0, tools = [], activeTool = "microsoft_docs_search";
+let tabs = [{ id:"search", title:"Search", type:"search" }], activeTabId = "search", tabCounter = 0;
+let docCache = new Map(), searchResults = [], focusedResult = -1;
+let currentDocUrl = "", currentDocMd = "", lastSearchHtml = "", tocVisible = false, chatVisible = false;
+
+// Restore persisted state
+let history = JSON.parse(localStorage.getItem("lmcp_history") || "[]");
+let bookmarks = JSON.parse(localStorage.getItem("lmcp_bookmarks") || "[]");
+(function restoreTheme() {
+  if (localStorage.getItem("lmcp_theme") === "light") {
+    document.body.classList.add("light");
+    requestAnimationFrame(() => { const b = document.getElementById("themeBtn"); if (b) b.textContent = "☾"; });
+  }
+})();
+function saveHistory() { localStorage.setItem("lmcp_history", JSON.stringify(history.slice(0, 50))); }
+function saveBookmarks() { localStorage.setItem("lmcp_bookmarks", JSON.stringify(bookmarks)); }
+function pruneDocCache() { if (docCache.size <= DOC_CACHE_MAX) return; const keys = [...docCache.keys()]; while (docCache.size > DOC_CACHE_MAX) docCache.delete(keys.shift()); }
+
+// ==================== NLP ENGINE ====================
+const STOPWORDS = new Set("a an the is are was were be been being have has had do does did will would shall should may might must can could of in to for on with at by from as into through during before after above below between out off over under again further then once here there when where why how all each every both few more most other some such no nor not only own same so than too very just don t s ll ve d m re about what your you this that these those".split(" "));
+// Short Azure terms to keep even though they're < 3 chars
+const KEEP_SHORT = new Set("az vm acr aks cli api app aca mcp sdk sql iot sku dns ssl tls rbac gpu cpu ip id uri url sas cdn vpn vms aad".split(" "));
+
+// Boilerplate patterns in MS Learn docs
+const BOILERPLATE_RE = [
+  /having issues\? let us know/i, /was this page helpful/i, /let us know on github/i,
+  /opening an issue in the/i, /need help with this topic/i, /suggest a fix/i,
+  /summarize this article for me/i, /additional resources\s*$/i, /in this article\s*$/i,
+];
+const TAB_RE = /^\*\s+\[.+\]\(#tabpanel/;
+
+function tokenize(text) {
+  return text.toLowerCase().replace(/[^a-z0-9\s-]/g, " ").split(/[\s-]+/)
+    .filter(w => (w.length > 2 || KEEP_SHORT.has(w)) && !STOPWORDS.has(w));
+}
+
+function stripMd(text) {
+  let c = text.replace(/\r\n/g, "\n")
+    .replace(/```[\w]*\n[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]\(#tabpanel[^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_`~\\>|]/g, "")
+    .replace(/\n{3,}/g, "\n\n");
+  c = c.split("\n").filter(l => {
+    const t = l.trim();
+    return !t || (!BOILERPLATE_RE.some(r => r.test(t)) && !TAB_RE.test(t));
+  }).join("\n").trim();
+  return c;
+}
+
+function extractCodeBlocks(text) {
+  const blocks = []; let m;
+  const re = /```(\w*)\n([\s\S]*?)```/g;
+  while ((m = re.exec(text)) !== null) if (m[2].trim().length > 10) blocks.push({ lang: m[1]||"shell", code: m[2].trim() });
+  return blocks;
+}
+
+function tf(tokens) {
+  const f = {}; tokens.forEach(t => f[t] = (f[t]||0)+1);
+  const mx = Math.max(...Object.values(f), 1);
+  const r = {}; for (const [k,v] of Object.entries(f)) r[k] = v/mx; return r;
+}
+function idf(docs) {
+  const N = docs.length, df = {};
+  docs.forEach(tokens => { const s = new Set(tokens); s.forEach(t => df[t] = (df[t]||0)+1); });
+  const r = {}; for (const [k,v] of Object.entries(df)) r[k] = Math.log((N+1)/(v+1))+1; return r;
+}
+function bm25Score(qTok, dTok, avgDl, idfS, k1=1.5, b=0.75) {
+  const dl = dTok.length; if (!dl) return 0;
+  const f = {}; dTok.forEach(t => f[t] = (f[t]||0)+1);
+  let s = 0; qTok.forEach(qt => { const fr=f[qt]||0; s += (idfS[qt]||1)*(fr*(k1+1))/(fr+k1*(1-b+b*dl/avgDl)); }); return s;
+}
+
+// Tab-like h3 headings that should merge into parent section
+const TAB_HEADINGS = /^(bash|powershell|azure cli|azure portal|cli|portal|python|javascript|typescript|java|csharp|c#|go|rust|ruby|php|.net|node\.?js)$/i;
+
+function parseSections(md) {
+  const sections = [], lines = md.replace(/\r\n/g,"\n").split("\n");
+  let heading = "Introduction", rawLines = [];
+  function push() {
+    const raw = rawLines.join("\n"), text = stripMd(raw), codes = extractCodeBlocks(raw);
+    if (text.length > 30 || codes.length) sections.push({ heading, content: text, codes, raw });
+  }
+  lines.forEach(line => {
+    const hm = line.match(/^(#{1,3})\s+(.+)$/);
+    if (hm) {
+      const cleanH = hm[2].replace(/[*`]/g,"").trim();
+      // Merge tab-like h3s (Bash, PowerShell, etc.) into parent section
+      if (hm[1].length === 3 && TAB_HEADINGS.test(cleanH)) {
+        rawLines.push(line); // keep as content, not a section break
+      } else {
+        if (rawLines.length) push();
+        heading = cleanH; rawLines = [];
+      }
+    } else rawLines.push(line);
+  });
+  if (rawLines.length) push();
+  return sections.filter(s => !["feedback","additional resources","in this article","next steps"].includes(s.heading.toLowerCase().trim()));
+}
+
+function splitSentences(text) {
+  return stripMd(text).replace(/\n+/g," ").replace(/\s+/g," ")
+    .split(/(?<=[.!?])\s+/).map(s=>s.trim())
+    .filter(s => s.length>30 && s.length<350 && !/^https?:/.test(s) && !/\.(png|jpg|gif|svg)/i.test(s) && !BOILERPLATE_RE.some(r=>r.test(s)));
+}
+
+// Section-aware summary: best sentence per section for coverage
+function summarize(md, max=5) {
+  const sections = parseSections(md);
+  if (!sections.length) return splitSentences(md).slice(0,max);
+  const all = [];
+  sections.forEach((sec,si) => {
+    splitSentences(sec.raw||sec.content).forEach((sent,pi) => all.push({sent,si,pi,h:sec.heading}));
+  });
+  if (all.length <= max) return all.map(s=>s.sent);
+  const toks = all.map(s=>tokenize(s.sent));
+  const idfS = idf(toks);
+  const scored = all.map((s,i) => {
+    const t=toks[i], tfs=tf(t); let sc=0; t.forEach(w=>sc+=(tfs[w]||0)*(idfS[w]||0));
+    const pos = s.pi===0?2.0:1+1/(1+s.pi*0.5);
+    const len = Math.min(t.length/10,1.5);
+    return {...s, score:sc*pos*len, gi:i};
+  });
+  scored.sort((a,b)=>b.score-a.score);
+  // Diversity: one per section first
+  const picked=[], used=new Set();
+  for (const s of scored) { if(picked.length>=max)break; if(!used.has(s.si)){picked.push(s);used.add(s.si);} }
+  for (const s of scored) { if(picked.length>=max)break; if(!picked.includes(s))picked.push(s); }
+  picked.sort((a,b)=>a.gi-b.gi);
+  return picked.map(s=>s.sent);
+}
+
+// BM25 Q&A with heading bonus + code inclusion
+function findAnswer(question, md) {
+  const sections = parseSections(md);
+  if (!sections.length) return { heading:"No content", snippet:"Could not parse.", score:0 };
+  const qTok = tokenize(question);
+  const allTok = sections.map(s=>tokenize(s.heading+" "+s.content));
+  const idfS = idf(allTok);
+  const avgDl = allTok.reduce((s,t)=>s+t.length,0)/allTok.length||1;
+  const scored = sections.map((s,i) => {
+    const cs = bm25Score(qTok, allTok[i], avgDl, idfS);
+    const ht = tokenize(s.heading);
+    const overlap = qTok.filter(qt=>ht.some(h=>h.includes(qt)||qt.includes(h))).length;
+    const hBonus = 1+overlap*5;
+    const cBonus = (s.codes?.length && /how|create|deploy|install|run|build|config|setup/i.test(question))?1.3:1;
+    return {...s, score:cs*hBonus*cBonus};
+  });
+  scored.sort((a,b)=>b.score-a.score);
+  const best=scored[0];
+  let snip = best.content; if(snip.length>400) snip=snip.slice(0,400)+"...";
+  let codeHtml="";
+  if(best.codes?.length){const c=best.codes[0];const p=c.code.length>250?c.code.slice(0,250)+"...":c.code;
+    codeHtml=`<pre style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;margin:6px 0;font-size:10px;color:var(--green);overflow-x:auto;font-family:'JetBrains Mono',monospace;"><code>${esc(p)}</code></pre>`;}
+  const qSet=new Set(qTok);
+  qSet.forEach(qt=>{const re=new RegExp(`\\b(${qt}\\w{0,6})\\b`,"gi");snip=snip.replace(re,"<mark>$1</mark>");});
+  return {heading:best.heading, snippet:snip+codeHtml, score:best.score, runner_up:scored[1]||null, sectionCount:sections.length};
+}
+
+function generateChips(md) {
+  const hs=[...md.replace(/\r\n/g,"\n").matchAll(/^#{2,3}\s+(.+)$/gm)].map(m=>m[1].replace(/[*`]/g,""));
+  const u=[...new Set(hs)].filter(h=>!["feedback","additional resources","in this article","next steps"].includes(h.toLowerCase().trim()));
+  return u.slice(0,8).map(h=>{const l=h.toLowerCase();
+    if(l.startsWith("prerequisite"))return"What are the prerequisites?";
+    if(l.includes("deploy"))return"How do I deploy?";if(l.includes("create"))return"How do I create?";
+    if(l.includes("clean"))return"How to clean up?";if(l.includes("config"))return"How to configure?";
+    if(l.includes("publish"))return"How do I publish?";if(l.includes("install"))return"How to install?";
+    if(l.includes("setup"))return"How do I set up?";if(l.includes("verify")||l.includes("test"))return"How to verify?";
+    if(l.includes("authent")||l.includes("sign in"))return"How does auth work?";
+    return"Tell me about "+h;});
+}
+
+// ==================== CHAT ====================
+function toggleChat() {
+  chatVisible = !chatVisible;
+  document.getElementById("chatPanel").classList.toggle("visible", chatVisible);
+  document.getElementById("chatToggle").classList.toggle("active", chatVisible);
+  if (chatVisible) document.getElementById("chatInput").focus();
+}
+
+function addChatMsg(type, html) {
+  const el = document.getElementById("chatMessages");
+  const msg = document.createElement("div");
+  msg.className = "chat-msg " + type;
+  msg.innerHTML = html;
+  el.appendChild(msg);
+  el.scrollTop = el.scrollHeight;
+}
+
+function setChatChips(chips) {
+  const el = document.getElementById("chatChips");
+  el.innerHTML = chips.map(c => `<div class="chat-chip" onclick="askFromChip('${escA(c)}')">${esc(c)}</div>`).join("");
+}
+
+function autoSummarize(md, title) {
+  const msgs = document.getElementById("chatMessages");
+  // Clear previous
+  msgs.innerHTML = "";
+
+  const sentences = summarize(md, 5);
+  const sections = parseSections(md);
+  const wordCount = md.split(/\s+/).length;
+
+  addChatMsg("bot", `<div class="summary-card">
+    <h4>AUTO-SUMMARY</h4>
+    <div class="summary-text"><ul>${sentences.map(s => `<li>${esc(s)}</li>`).join("")}</ul></div>
+    <div class="summary-stats">
+      <span>${wordCount.toLocaleString()} words</span>
+      <span>${sections.length} sections</span>
+      <span>TF-IDF extracted</span>
+    </div>
+  </div>`);
+
+  const chips = generateChips(md);
+  setChatChips(chips);
+}
+
+function askQuestion() {
+  const input = document.getElementById("chatInput");
+  const q = input.value.trim();
+  if (!q || !currentDocMd) return;
+  input.value = "";
+
+  addChatMsg("user", esc(q));
+
+  const result = findAnswer(q, currentDocMd);
+  const confidence = result.score > 10 ? "HIGH" : result.score > 5 ? "MEDIUM" : "LOW";
+  const confColor = confidence === "HIGH" ? "var(--green)" : confidence === "MEDIUM" ? "var(--yellow)" : "var(--red)";
+
+  let html = `<h4>${esc(result.heading)}</h4><div class="snippet">${result.snippet}</div>`;
+  html += `<div class="confidence">relevance: <span style="color:${confColor}">${confidence}</span> (BM25: ${result.score.toFixed(1)})</div>`;
+  if (result.runner_up) {
+    html += `<div style="margin-top:4px;font-size:9px;color:var(--text-muted);">Also see: <span style="color:var(--accent);cursor:pointer;" onclick="askFromChip('What about ${escA(result.runner_up.heading)}?')">${esc(result.runner_up.heading)}</span></div>`;
+  }
+  addChatMsg("bot", html);
+}
+
+function askFromChip(q) {
+  document.getElementById("chatInput").value = q;
+  askQuestion();
+}
+
+// ==================== MCP ====================
+async function rpcCall(method, params = {}) {
+  rpcId++;
+  const body = { jsonrpc:"2.0", id:rpcId, method, params };
+  addLog("out", method, body);
+  const headers = { "Content-Type":"application/json", "Accept":"application/json, text/event-stream" };
+  if (sessionId) headers["Mcp-Session-Id"] = sessionId;
+  const res = await fetch(PROXY, { method:"POST", headers, body:JSON.stringify(body) });
+  if (!res.ok && (res.status === 401 || res.status === 404 || res.status === 410)) {
+    addLog("err", method, { error: `Session lost (${res.status}), reconnecting...` });
+    sessionId = null; setConnected(false); toast("Session lost, reconnecting...");
+    await initSession(); return rpcCall(method, params);
+  }
+  const sid = res.headers.get("Mcp-Session-Id"); if (sid) sessionId = sid;
+  const ct = res.headers.get("Content-Type") || "";
+  if (ct.includes("text/event-stream")) {
+    const text = await res.text(); let data = null;
+    for (const line of text.split("\n")) { if (line.startsWith("data: ")) { try { data = JSON.parse(line.slice(6)); } catch(e) {} } }
+    if (data) { addLog("in", method, data); return data; }
+    addLog("err", method, { error: "Empty SSE response" });
+    return { result: { content: [] } };
+  }
+  const data = await res.json(); addLog("in", method, data); return data;
+}
+
+async function initSession() {
+  const btn = document.getElementById("connectBtn"); btn.textContent = "..."; btn.disabled = true;
+  try {
+    await rpcCall("initialize", { protocolVersion:"2025-03-26", capabilities:{}, clientInfo:{ name:"learn-mcp-client", version:"3.0" } });
+    await fetch(PROXY, { method:"POST", headers:{ "Content-Type":"application/json", "Accept":"application/json, text/event-stream", ...(sessionId?{"Mcp-Session-Id":sessionId}:{}) }, body:JSON.stringify({ jsonrpc:"2.0", method:"notifications/initialized" }) });
+    const r = await rpcCall("tools/list", {}); tools = r?.result?.tools || [];
+    setConnected(true); renderTools(); btn.textContent = "LIVE"; btn.classList.add("connected");
+    document.getElementById("searchBtn").disabled = false; document.getElementById("queryInput").focus();
+  } catch(err) { addLog("err","init",{error:err.message}); btn.textContent = "RETRY"; btn.disabled = false; setConnected(false); }
+}
+
+async function doSearch() {
+  const q = document.getElementById("queryInput").value.trim();
+  if (!q || !sessionId) return;
+  const el = document.getElementById("results");
+  el.innerHTML = '<div class="empty-state"><div class="spinner"></div> Querying...</div>';
+  focusedResult = -1;
+  try {
+    const result = await rpcCall("tools/call", { name:activeTool, arguments:{ query:q } });
+    let parsed = [];
+    // Try structuredContent first (pre-parsed), then fall back to content[0].text
+    const sc = result?.result?.structuredContent?.results;
+    if (sc && sc.length) { parsed = sc; }
+    else {
+      const content = result?.result?.content || [];
+      for (const block of content) { if (block.type === "text") { try { const obj = JSON.parse(block.text); parsed = Array.isArray(obj) ? obj : (obj.results || [obj]); } catch { parsed = [{ title:"Result", content:block.text }]; } } }
+    }
+    // Deduplicate: if multiple doc results share the same base URL, keep the one with most content
+    // Skip dedup for code samples (they legitimately share URLs)
+    const isCodeSamples = parsed[0] && parsed[0].codeSnippet;
+    if (!isCodeSamples) {
+      const seen = new Map();
+      parsed.forEach(item => {
+        const url = item.contentUrl || item.link || "";
+        const base = url.split("#")[0];
+        if (!seen.has(base)) seen.set(base, item);
+        else if ((item.content||"").length > (seen.get(base).content||"").length) seen.set(base, item);
+      });
+      parsed = [...seen.values()];
+    }
+    searchResults = parsed; renderResults(parsed, q);
+  } catch(err) { el.innerHTML = `<div class="empty-state" style="color:var(--red);">${esc(err.message)}</div>`; }
+}
+
+function renderResults(items, query) {
+  const el = document.getElementById("results");
+  if (!items.length) { el.innerHTML = `<div class="empty-state"><p>No results for "${esc(query)}"</p></div>`; return; }
+
+  // Detect if these are code sample results (have codeSnippet field)
+  const isCodeSamples = items[0] && items[0].codeSnippet;
+
+  if (isCodeSamples) {
+    el.innerHTML = items.map((item, i) => {
+      const desc = (item.description || "").replace(/^description:\s*/i,"").replace(/\npackage:.*$/s,"").trim();
+      const lang = item.language || "code";
+      const code = (item.codeSnippet || "").replace(/\r\n/g,"\n").trim();
+      const preview = code.length > 200 ? code.slice(0,200)+"..." : code;
+      let url = item.link || "#";
+      if (url.startsWith("/")) url = "https://learn.microsoft.com" + url;
+      const fragment = url.includes("#") ? url.split("#")[1].replace(/-/g," ") : "";
+      return `<div class="result-card ${i===focusedResult?'focused':''}" onclick="openDoc('${escA(url.split('#')[0])}','${escA(desc.slice(0,40))}')" data-idx="${i}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div class="result-title" style="margin:0;">${esc(desc.slice(0,80))}${desc.length>80?'...':''}</div>
+          <span style="font-size:9px;padding:1px 6px;border-radius:3px;background:var(--surface-3);color:var(--green);font-family:'JetBrains Mono',monospace;">${esc(lang)}</span>
+        </div>
+        ${fragment?`<div style="font-size:9px;color:var(--purple);font-family:'JetBrains Mono',monospace;margin-bottom:4px;">§ ${esc(fragment)}</div>`:''}
+        <pre style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;margin:0;font-size:10px;color:var(--green);overflow-x:auto;font-family:'JetBrains Mono',monospace;max-height:120px;overflow-y:auto;"><code>${esc(preview)}</code></pre>
+        <div class="result-meta" style="margin-top:6px;"><span>${esc(truncUrl(url))}</span></div>
+      </div>`;
+    }).join("");
+  } else {
+    el.innerHTML = items.map((item, i) => {
+      const title = item.title || item.name || "Untitled";
+      const rawDesc = item.description || item.summary || item.snippet || item.content || "";
+      const desc = rawDesc.replace(/```[\s\S]*?```/g," ").replace(/!\[[^\]]*\]\([^)]*\)/g,"")
+        .replace(/\[[^\]]*\]\(#tabpanel[^)]*\)/g,"").replace(/###\s+\*\*\w+\*\*/g,"")
+        .replace(/[#*`\[\]()\\|]/g,"").replace(/\n+/g," ").replace(/\s+/g," ").trim().slice(0,200);
+      let url = item.contentUrl || item.url || item.link || "#";
+      if (url.startsWith("/")) url = "https://learn.microsoft.com" + url;
+      const fragment = url.includes("#") ? url.split("#")[1].replace(/-/g," ") : "";
+      const baseUrl = url.split("#")[0];
+      return `<div class="result-card ${i===focusedResult?'focused':''}" onclick="openDoc('${escA(baseUrl)}','${escA(title)}')" data-idx="${i}">
+        <div class="result-title">${esc(title)}</div>
+        ${fragment?`<div style="font-size:9px;color:var(--purple);font-family:'JetBrains Mono',monospace;margin-bottom:3px;">§ ${esc(fragment)}</div>`:''}
+        <div class="result-desc">${esc(desc)}${rawDesc.length>200?'...':''}</div>
+        <div class="result-meta"><span>${esc(truncUrl(baseUrl))}</span></div></div>`;
+    }).join("");
+  }
+  lastSearchHtml = el.innerHTML;
+}
+
+async function openDoc(url, title) {
+  if (docCache.has(url)) { const c = docCache.get(url); showDoc(c.markdown, c.title||title, url); return; }
+  document.getElementById("results").innerHTML = '<div class="empty-state"><div class="spinner"></div> Fetching...</div>';
+  try {
+    const result = await rpcCall("tools/call", { name:"microsoft_docs_fetch", arguments:{ url } });
+    let md = ""; for (const b of (result?.result?.content||[])) { if (b.type==="text") { try { const o=JSON.parse(b.text); md=o.content||o.markdown||o.text||b.text; } catch { md=b.text; } } }
+    const titleMatch = md.match(/^#\s+(.+)$/m);
+    const docTitle = titleMatch ? titleMatch[1] : title;
+    docCache.set(url, { markdown:md, title:docTitle }); pruneDocCache(); addHistory(url, docTitle); showDoc(md, docTitle, url);
+  } catch(err) { document.getElementById("results").innerHTML = `<div class="empty-state" style="color:var(--red);">${esc(err.message)}</div>`; }
+}
+
+function showDoc(md, title, url) {
+  currentDocUrl = url; currentDocMd = md;
+  const el = document.getElementById("results");
+  const bm = bookmarks.some(b => b.url === url);
+  el.innerHTML = `<div class="doc-viewer">
+    <div class="doc-toolbar">
+      <button class="doc-btn" onclick="goBack()">← Back</button>
+      <button class="doc-btn" onclick="toggleBookmark('${escA(url)}','${escA(title)}')">${bm?'★':'☆'} Bookmark</button>
+      <button class="doc-btn" onclick="exportMd('${escA(url)}')">📋 MD</button>
+      <button class="doc-btn" onclick="openInNewTab('${escA(url)}','${escA(title)}')">⧉ Tab</button>
+      <button class="doc-btn" onclick="window.open('${escA(url)}','_blank')">↗ Ext</button>
+    </div>
+    <div class="doc-content" id="docContent">${renderMarkdown(md)}</div>
+  </div>`;
+  const tab = tabs.find(t => t.id === activeTabId);
+  if (tab && tab.type !== "search") { tab.title = title.slice(0,25); tab.url = url; renderTabs(); }
+  buildToc(md); attachCopyButtons();
+  // Auto-summarize in chat
+  autoSummarize(md, title);
+  if (!chatVisible) { toggleChat(); }
+}
+
+// ==================== TABS ====================
+function newTab() { tabCounter++; const id="tab-"+tabCounter; tabs.push({id,title:"New Tab",type:"doc"}); activeTabId=id; renderTabs(); document.getElementById("results").innerHTML='<div class="empty-state"><p>Search or ⌘K</p></div>'; }
+function switchTab(id) { activeTabId=id; renderTabs(); const tab=tabs.find(t=>t.id===id); if(tab?.type==="search"){document.getElementById("results").innerHTML=lastSearchHtml||'<div class="empty-state"><div class="icon">⚡</div><p>Search</p></div>';} else if(tab?.url&&docCache.has(tab.url)){const c=docCache.get(tab.url);showDoc(c.markdown,c.title,tab.url);} }
+function closeTab(id,e) { e.stopPropagation(); if(tabs.length<=1)return; const idx=tabs.findIndex(t=>t.id===id); tabs.splice(idx,1); if(activeTabId===id){activeTabId=tabs[Math.min(idx,tabs.length-1)].id;switchTab(activeTabId);} renderTabs(); }
+function openInNewTab(url,title) { tabCounter++; const id="tab-"+tabCounter; tabs.push({id,title:title.slice(0,25),type:"doc",url}); activeTabId=id; renderTabs(); if(docCache.has(url)){const c=docCache.get(url);showDoc(c.markdown,c.title,url);}else openDoc(url,title); }
+function renderTabs() { document.getElementById("tabBar").innerHTML=tabs.map(t=>`<div class="tab ${t.id===activeTabId?'active':''}" onclick="switchTab('${t.id}')"><span class="tab-title">${esc(t.title)}</span>${t.type!=='search'?`<span class="tab-close" onclick="closeTab('${t.id}',event)">×</span>`:''}</div>`).join("")+'<div class="tab-new" onclick="newTab()">+</div>'; }
+
+// ==================== TOC ====================
+function buildToc(md) { const list=document.getElementById("tocList"); const h=[...md.matchAll(/^(#{2,3})\s+(.+)$/gm)]; if(!h.length){list.innerHTML='<div style="padding:8px;color:var(--text-muted);font-size:10px;">No headings</div>';return;} list.innerHTML=h.map((m,i)=>`<div class="toc-item ${m[1].length===2?'h2':'h3'}" onclick="scrollToHeading(${i})">${esc(m[2].replace(/[*`]/g,''))}</div>`).join(""); }
+function scrollToHeading(i) { const dc=document.getElementById("docContent"); if(!dc)return; const h=dc.querySelectorAll("h2,h3"); if(h[i])h[i].scrollIntoView({behavior:"smooth",block:"start"}); }
+function toggleToc() { tocVisible=!tocVisible; document.getElementById("tocPanel").classList.toggle("visible",tocVisible); }
+
+// ==================== SIDEBAR ====================
+function addHistory(url,title) { history=history.filter(h=>h.url!==url); history.unshift({url,title,ts:Date.now()}); if(history.length>50)history.pop(); saveHistory(); renderHistory(); }
+function renderHistory() { const el=document.getElementById("historyList"); if(!history.length){el.innerHTML='<div style="color:var(--text-muted);font-size:9px;">None</div>';return;} el.innerHTML=history.slice(0,8).map(h=>`<div class="tool-item" onclick="openDoc('${escA(h.url)}','${escA(h.title)}')"><div class="tool-name" style="font-size:9px;">${esc(h.title.slice(0,30))}</div></div>`).join(""); }
+function toggleBookmark(url,title) { const i=bookmarks.findIndex(b=>b.url===url); if(i>=0)bookmarks.splice(i,1);else bookmarks.push({url,title}); saveBookmarks(); renderBookmarks(); if(currentDocUrl===url&&docCache.has(url)){const c=docCache.get(url);showDoc(c.markdown,c.title,url);} toast(i>=0?"Removed":"Bookmarked!"); }
+function renderBookmarks() { const el=document.getElementById("bookmarkList"); if(!bookmarks.length){el.innerHTML='<div style="color:var(--text-muted);font-size:9px;">None</div>';return;} el.innerHTML=bookmarks.map(b=>`<div class="tool-item" onclick="openDoc('${escA(b.url)}','${escA(b.title)}')"><div class="tool-name" style="font-size:9px;">★ ${esc(b.title.slice(0,28))}</div></div>`).join(""); }
+function exportMd(url) { const c=docCache.get(url); if(!c){toast("No doc");return;} navigator.clipboard.writeText(c.markdown).then(()=>toast("MD copied!")).catch(()=>toast("Failed")); }
+function renderTools() { const el=document.getElementById("toolList"); if(!tools.length)return; el.innerHTML=tools.map(t=>`<div class="tool-item ${t.name===activeTool?'active':''}" onclick="selectTool('${t.name}')"><div class="tool-name">${t.name.replace('microsoft_','')}</div></div>`).join(""); }
+function selectTool(name) { activeTool=name; renderTools(); document.getElementById("queryInput").placeholder=`Search ${name.replace('microsoft_','')}...`; toast(`Tool: ${name.replace('microsoft_','')}`); }
+function goBack() { if(lastSearchHtml)document.getElementById("results").innerHTML=lastSearchHtml; currentDocMd=""; document.getElementById("tocList").innerHTML=""; }
+function setConnected(s) { document.getElementById("statusDot").className="status-dot"+(s?" connected":""); document.getElementById("statusText").textContent=s?`session:${sessionId?.slice(0,8)}`:"disconnected"; }
+
+// ==================== COPY BUTTONS ====================
+function attachCopyButtons() { document.querySelectorAll(".doc-content pre").forEach(pre=>{const btn=document.createElement("button");btn.className="copy-btn";btn.textContent="COPY";btn.onclick=()=>{const code=pre.querySelector("code")?.textContent||pre.textContent;navigator.clipboard.writeText(code).then(()=>{btn.textContent="OK!";setTimeout(()=>btn.textContent="COPY",1200);});};pre.style.position="relative";pre.appendChild(btn);}); }
+
+// ==================== MARKDOWN ====================
+function renderMarkdownTable(block) {
+  const lines = block.trim().split("\n").filter(l => l.trim());
+  if (lines.length < 2) return null;
+  // Check for separator row (---|---|---)
+  const sepIdx = lines.findIndex(l => /^\|?[\s-:|]+\|[\s-:|]+\|?$/.test(l.trim()));
+  if (sepIdx < 1) return null;
+  const parseRow = r => r.replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+  const headers = parseRow(lines[sepIdx - 1]);
+  const dataLines = lines.slice(sepIdx + 1);
+  let html = "<table><thead><tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>";
+  dataLines.forEach(line => {
+    if (/^\|?[\s-:|]+\|/.test(line.trim())) return; // skip extra separators
+    const cells = parseRow(line);
+    html += "<tr>" + cells.map(c => `<td>${c}</td>`).join("") + "</tr>";
+  });
+  return html + "</tbody></table>";
+}
+
+function renderMarkdown(md) {
+  if(!md)return'<p style="color:var(--text-muted);">Empty.</p>';
+  // Normalize line endings
+  md = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Fenced code blocks: handle optional lang with spaces, optional trailing whitespace
+  let h = md.replace(/```[ \t]*[\w#+-]*[ \t]*\n([\s\S]*?)```/g, (_,c) => `<pre><code>${esc(c.trim())}</code></pre>`);
+  // Indented code blocks: 4+ spaces or 1 tab at line start, consecutive lines
+  h = h.replace(/((?:^(?:    |\t).+\n?)+)/gm, (block) => {
+    const code = block.replace(/^(?:    |\t)/gm, "").trim();
+    if (code.length < 6) return block;
+    return `<pre><code>${esc(code)}</code></pre>\n`;
+  });
+  // Markdown tables: detect pipe-delimited blocks with a separator row
+  h = h.replace(/((?:^.*\|.*$\n?){2,})/gm, (block) => {
+    const tbl = renderMarkdownTable(block);
+    return tbl || block;
+  });
+  h = h.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,(_,a,s)=>`<img src="${resolveUrl(s)}" alt="${esc(a)}">`)
+    .replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^# (.+)$/gm,'<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,(_,t,r)=>{const u=resolveUrl(r);return`<a href="${u}" onclick="event.preventDefault();openDoc('${escA(u)}','doc')">${t}</a>`;});
+  // Blockquotes: merge consecutive > lines into one blockquote
+  h = h.replace(/(^> .+$\n?)+/gm, (block) => {
+    const inner = block.replace(/^> /gm, "").trim().replace(/\n/g, "<br>");
+    return `<blockquote>${inner}</blockquote>`;
+  });
+  // Lists: tag ordered vs unordered items distinctly, then wrap
+  h = h.replace(/^[-*] (.+)$/gm,'<uli>$1</uli>').replace(/^\d+\. (.+)$/gm,'<oli>$1</oli>');
+  h = h.replace(/((?:<uli>.*<\/uli>\n?)+)/g, (m) => '<ul>' + m.replace(/<\/?uli>/g, (t) => t.replace('uli','li')) + '</ul>');
+  h = h.replace(/((?:<oli>.*<\/oli>\n?)+)/g, (m) => '<ol>' + m.replace(/<\/?oli>/g, (t) => t.replace('oli','li')) + '</ol>');
+  h=h.split('\n\n').map(b=>{b=b.trim();if(!b)return'';if(/^<(h[1-3]|pre|ul|ol|blockquote|img|table)/.test(b))return b;return`<p>${b.replace(/\n/g,'<br>')}</p>`;}).join('\n');
+  return h;
+}
+
+// ==================== COMMAND PALETTE ====================
+let paletteItems=[],paletteFocus=0;
+function openPalette(){buildPaletteItems();document.getElementById("paletteOverlay").classList.add("open");const i=document.getElementById("paletteInput");i.value="";i.focus();filterPalette();}
+function closePalette(){document.getElementById("paletteOverlay").classList.remove("open");}
+function buildPaletteItems(){paletteItems=[{icon:"🔍",text:"Search docs",hint:"focus search",action:()=>{closePalette();document.getElementById("queryInput").focus();}},{icon:"💬",text:"Toggle Ask panel",hint:"⌘J",action:()=>{closePalette();toggleChat();}},{icon:"🔧",text:"Docs search",hint:"microsoft_docs_search",action:()=>{closePalette();selectTool("microsoft_docs_search");}},{icon:"💻",text:"Code samples",hint:"microsoft_code_sample_search",action:()=>{closePalette();selectTool("microsoft_code_sample_search");}},{icon:"📑",text:"Toggle TOC",hint:"contents",action:()=>{closePalette();toggleToc();}},{icon:"➕",text:"New tab",hint:"tab",action:()=>{closePalette();newTab();}},...bookmarks.map(b=>({icon:"★",text:b.title,hint:"bookmark",action:()=>{closePalette();openDoc(b.url,b.title);}})),...history.slice(0,12).map(h=>({icon:"↩",text:h.title,hint:"history",action:()=>{closePalette();openDoc(h.url,h.title);}})),];}
+function filterPalette(){const q=document.getElementById("paletteInput").value.toLowerCase();const f=q?paletteItems.filter(i=>i.text.toLowerCase().includes(q)||i.hint.toLowerCase().includes(q)):paletteItems;paletteFocus=0;const el=document.getElementById("paletteResults");if(!f.length){el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No matches</div>';return;}el.innerHTML=f.map((item,i)=>`<div class="palette-item ${i===paletteFocus?'focused':''}" onclick="execPalette(${i})" data-idx="${i}"><span class="palette-icon">${item.icon}</span><span class="palette-text">${esc(item.text)}</span><span class="palette-hint">${esc(item.hint)}</span></div>`).join("");}
+function execPalette(idx){const q=document.getElementById("paletteInput").value.toLowerCase();const f=q?paletteItems.filter(i=>i.text.toLowerCase().includes(q)||i.hint.toLowerCase().includes(q)):paletteItems;if(f[idx])f[idx].action();}
+function handlePaletteKey(e){const items=document.querySelectorAll(".palette-item");if(e.key==="Escape"){closePalette();e.preventDefault();}else if(e.key==="ArrowDown"){paletteFocus=Math.min(paletteFocus+1,items.length-1);items.forEach((el,i)=>el.classList.toggle("focused",i===paletteFocus));e.preventDefault();}else if(e.key==="ArrowUp"){paletteFocus=Math.max(paletteFocus-1,0);items.forEach((el,i)=>el.classList.toggle("focused",i===paletteFocus));e.preventDefault();}else if(e.key==="Enter"){execPalette(paletteFocus);e.preventDefault();}}
+
+// ==================== KEYBOARD ====================
+function handleSearchKey(e){if(e.key==="Enter")doSearch();else if(e.key==="ArrowDown"&&searchResults.length){e.preventDefault();focusedResult=0;highlightResult();}else if(e.key==="Escape")e.target.blur();}
+document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="k"){e.preventDefault();openPalette();return;}if((e.metaKey||e.ctrlKey)&&e.key==="j"){e.preventDefault();toggleChat();return;}if(e.key==="Escape"&&document.getElementById("paletteOverlay").classList.contains("open")){closePalette();return;}if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA")return;if(e.key==="/"){e.preventDefault();document.getElementById("queryInput").focus();}else if(e.key==="Escape")goBack();else if(e.key==="ArrowDown"&&searchResults.length){e.preventDefault();focusedResult=Math.min(focusedResult+1,searchResults.length-1);highlightResult();}else if(e.key==="ArrowUp"&&searchResults.length){e.preventDefault();focusedResult=Math.max(focusedResult-1,0);highlightResult();}else if(e.key==="Enter"&&focusedResult>=0){e.preventDefault();const item=searchResults[focusedResult];const url=item.contentUrl||item.url||item.link||"#";const base=url.split("#")[0];openDoc(base.startsWith("/")?("https://learn.microsoft.com"+base):base,item.title||item.description||"Doc");}});
+function highlightResult(){document.querySelectorAll(".result-card").forEach((el,i)=>el.classList.toggle("focused",i===focusedResult));const f=document.querySelector(".result-card.focused");if(f)f.scrollIntoView({block:"nearest"});}
+
+// ==================== UTIL ====================
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function escA(s){return String(s).replace(/&/g,"&amp;").replace(/'/g,"&#39;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function truncUrl(u){try{return new URL(u).pathname.slice(0,45);}catch{return u.slice(0,45);}}
+function resolveUrl(src){if(src.startsWith("http"))return src;if(src.startsWith("/"))return"https://learn.microsoft.com"+src;if(currentDocUrl){try{return currentDocUrl.replace(/\/[^/]*$/,"/")+src;}catch{}}return"https://learn.microsoft.com/"+src;}
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2000);}
+function toggleTheme(){
+  document.body.classList.toggle("light");
+  const isLight = document.body.classList.contains("light");
+  document.getElementById("themeBtn").textContent = isLight ? "☾" : "☀";
+  localStorage.setItem("lmcp_theme", isLight ? "light" : "dark");
+  toast(isLight ? "Light mode" : "Dark mode");
+}
+let logCount=0;function addLog(dir,method,data){logCount++;const ts=new Date().toLocaleTimeString("en-US",{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit"});const cls=dir==="err"?"err":dir==="out"?"dir-out":"dir-in";const arrow=dir==="out"?"→":dir==="in"?"←":"✕";document.getElementById("logCount").textContent=logCount;const panel=document.getElementById("logPanel");const entry=document.createElement("div");entry.className="log-entry";entry.innerHTML=`<span class="ts">${ts}</span> <span class="${cls}">${arrow}</span> <strong>${method}</strong> ${esc(JSON.stringify(data).slice(0,90))}`;panel.appendChild(entry);panel.scrollTop=panel.scrollHeight;}
+function toggleLog(){document.getElementById("logPanel").classList.toggle("open");document.getElementById("logArrow").textContent=document.getElementById("logPanel").classList.contains("open")?"▼":"▶";}
+
+// Render persisted state on load
+renderHistory(); renderBookmarks();
+</script>
+</body>
+</html>
