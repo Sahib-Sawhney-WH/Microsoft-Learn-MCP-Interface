@@ -947,12 +947,21 @@ function renderMarkdown(md) {
   if(!md)return'<p style="color:var(--text-muted);">Empty.</p>';
   // Normalize line endings
   md = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  // Convert raw HTML <pre><code>...</code></pre> to fenced code blocks before processing
-  md = md.replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/gi, (_, c) => "```\n" + c.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"') + "\n```");
+  // Convert raw HTML code blocks to fenced code blocks before processing
+  // Handle: <pre><code>, <pre class="..."><code>, <pre><code class="...">, <pre> without <code>
+  md = md.replace(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, c) => "```\n" + c.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/<br\s*\/?>/gi,"\n") + "\n```");
+  md = md.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_, c) => {
+    if (c.includes("<code")) return _; // already handled above
+    return "```\n" + c.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/<br\s*\/?>/gi,"\n") + "\n```";
+  });
+  // Also handle HTML-escaped versions: &lt;pre&gt;&lt;code&gt;...&lt;/code&gt;&lt;/pre&gt;
+  md = md.replace(/&lt;pre[^&]*?&gt;&lt;code[^&]*?&gt;([\s\S]*?)&lt;\/code&gt;&lt;\/pre&gt;/gi, (_, c) => "```\n" + c.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">") + "\n```");
   // Fenced code blocks: handle optional lang with spaces, optional trailing whitespace
   let h = md.replace(/```[ \t]*[\w#+-]*[ \t]*\n([\s\S]*?)```/g, (_,c) => `<pre><code>${esc(c.trim())}</code></pre>`);
   // Indented code blocks: 4+ spaces or 1 tab at line start, consecutive lines
+  // Skip blocks that already contain <pre> (already processed by fenced code handler)
   h = h.replace(/((?:^(?:    |\t).+\n?)+)/gm, (block) => {
+    if (block.includes("<pre>") || block.includes("</pre>")) return block;
     const code = block.replace(/^(?:    |\t)/gm, "").trim();
     if (code.length < 6) return block;
     return `<pre><code>${esc(code)}</code></pre>\n`;
