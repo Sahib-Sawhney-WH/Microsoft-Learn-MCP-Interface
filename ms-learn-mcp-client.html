@@ -36,6 +36,10 @@ body.light .chat-msg .snippet mark { background:#fef08a; color:#713f12; }
 body.light .log-entry { border-bottom-color:#e5e7eb; }
 body.light .tab.active { background:var(--bg); border-bottom-color:var(--accent); }
 body.light img { border-color:#d1d5db; }
+.provider-switch { display:flex; gap:2px; padding:2px; background:var(--surface-2); border-radius:5px; border:1px solid var(--border); }
+.provider-btn { padding:3px 8px; border:none; border-radius:3px; font-family:'JetBrains Mono',monospace; font-size:9px; cursor:pointer; background:transparent; color:var(--text-muted); transition:all 0.15s; }
+.provider-btn.active { background:var(--accent); color:#fff; }
+.provider-btn.aws.active { background:#ff9900; color:#111; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'IBM Plex Sans',sans-serif; background:var(--bg); color:var(--text); height:100vh; overflow:hidden; display:flex; flex-direction:column; }
 .mono { font-family:'JetBrains Mono',monospace; }
@@ -188,8 +192,12 @@ pre:hover .copy-btn { opacity:1; } .copy-btn:hover { color:var(--green); border-
 <body>
 
 <div class="header">
-  <div class="header-left"><div class="logo">LEARN:MCP <span>// zero-llm docs browser</span></div></div>
+  <div class="header-left"><div class="logo">LEARN:MCP <span>// multi-cloud docs browser</span></div></div>
   <div class="header-right">
+    <div class="provider-switch" id="providerSwitch">
+      <button class="provider-btn active" data-prov="mslearn" onclick="switchProvider('mslearn')">MS Learn</button>
+      <button class="provider-btn aws" data-prov="aws" onclick="switchProvider('aws')">AWS</button>
+    </div>
     <button class="hdr-btn" onclick="toggleTheme()" id="themeBtn">☀</button>
     <button class="hdr-btn" onclick="toggleChat()" id="chatToggle">ASK<span class="kbd">⌘J</span></button>
     <button class="hdr-btn" onclick="toggleToc()">TOC</button>
@@ -209,7 +217,7 @@ pre:hover .copy-btn { opacity:1; } .copy-btn:hover { color:var(--green); border-
     <div class="sidebar-section"><div class="sidebar-label">Tools</div><div id="toolList" style="font-size:10px;color:var(--text-muted);">Connect to discover</div></div>
     <div class="sidebar-section" style="flex:1;overflow-y:auto;"><div class="sidebar-label">History</div><div id="historyList" style="font-size:10px;color:var(--text-muted);">No history</div></div>
     <div class="sidebar-section"><div class="sidebar-label">Bookmarks</div><div id="bookmarkList" style="font-size:10px;color:var(--text-muted);">None</div></div>
-    <div class="sidebar-footer">proxy: sahibiscool.workers.dev</div>
+    <div class="sidebar-footer" id="sidebarFooter">MS Learn + AWS | MCP client</div>
   </div>
 
   <div class="content">
@@ -236,7 +244,7 @@ pre:hover .copy-btn { opacity:1; } .copy-btn:hover { color:var(--green); border-
           <span class="chat-close" onclick="toggleChat()">×</span>
         </div>
         <div class="chat-messages" id="chatMessages">
-          <div class="chat-msg system">Open a doc, and I'll auto-summarize it. Then ask me anything about it - I'll find the most relevant section. <br><br><strong>No LLM. Pure TF-IDF + BM25.</strong></div>
+          <div class="chat-msg system">Open a doc, and I'll auto-summarize it. Then ask me anything about it - I'll find the most relevant section. Works with MS Learn and AWS docs.<br><br><strong>No LLM. Pure TF-IDF + BM25.</strong></div>
         </div>
         <div class="chat-chips" id="chatChips"></div>
         <div class="chat-input-row">
@@ -259,9 +267,15 @@ pre:hover .copy-btn { opacity:1; } .copy-btn:hover { color:var(--green); border-
 <div class="toast" id="toast"></div>
 
 <script>
-const PROXY = "https://mcp-proxy.sahibiscool.workers.dev";
+const PROXY_BASE = "YOUR_WORKER_URL_HERE";
 const DOC_CACHE_MAX = 50;
-let sessionId = null, rpcId = 0, tools = [], activeTool = "microsoft_docs_search";
+const PROVIDERS = {
+  mslearn: { name:"MS Learn", path:"/mslearn", color:"var(--accent)", search:"microsoft_docs_search", fetch:"microsoft_docs_fetch", code:"microsoft_code_sample_search" },
+  aws: { name:"AWS", path:"/aws", color:"#ff9900", search:"aws___search_documentation", fetch:"aws___read_documentation", code:null }
+};
+let activeProvider = "mslearn";
+let sessions = {}; // provider -> sessionId
+let rpcId = 0, tools = [], activeTool = "";
 let tabs = [{ id:"search", title:"Search", type:"search" }], activeTabId = "search", tabCounter = 0;
 let docCache = new Map(), searchResults = [], focusedResult = -1;
 let currentDocUrl = "", currentDocMd = "", lastSearchHtml = "", tocVisible = false, chatVisible = false;
@@ -506,19 +520,23 @@ function askFromChip(q) {
 }
 
 // ==================== MCP ====================
+function getProxy() { return PROXY_BASE + PROVIDERS[activeProvider].path; }
+function getSessionId() { return sessions[activeProvider] || null; }
+function setSessionId(sid) { if (sid) sessions[activeProvider] = sid; }
+
 async function rpcCall(method, params = {}) {
   rpcId++;
   const body = { jsonrpc:"2.0", id:rpcId, method, params };
   addLog("out", method, body);
   const headers = { "Content-Type":"application/json", "Accept":"application/json, text/event-stream" };
-  if (sessionId) headers["Mcp-Session-Id"] = sessionId;
-  const res = await fetch(PROXY, { method:"POST", headers, body:JSON.stringify(body) });
+  const sid = getSessionId(); if (sid && sid !== "stateless") headers["Mcp-Session-Id"] = sid;
+  const res = await fetch(getProxy(), { method:"POST", headers, body:JSON.stringify(body) });
   if (!res.ok && (res.status === 401 || res.status === 404 || res.status === 410)) {
     addLog("err", method, { error: `Session lost (${res.status}), reconnecting...` });
-    sessionId = null; setConnected(false); toast("Session lost, reconnecting...");
+    sessions[activeProvider] = null; setConnected(false); toast("Session lost, reconnecting...");
     await initSession(); return rpcCall(method, params);
   }
-  const sid = res.headers.get("Mcp-Session-Id"); if (sid) sessionId = sid;
+  const newSid = res.headers.get("Mcp-Session-Id"); setSessionId(newSid);
   const ct = res.headers.get("Content-Type") || "";
   if (ct.includes("text/event-stream")) {
     const text = await res.text(); let data = null;
@@ -533,42 +551,106 @@ async function rpcCall(method, params = {}) {
 async function initSession() {
   const btn = document.getElementById("connectBtn"); btn.textContent = "..."; btn.disabled = true;
   try {
-    await rpcCall("initialize", { protocolVersion:"2025-03-26", capabilities:{}, clientInfo:{ name:"learn-mcp-client", version:"3.0" } });
-    await fetch(PROXY, { method:"POST", headers:{ "Content-Type":"application/json", "Accept":"application/json, text/event-stream", ...(sessionId?{"Mcp-Session-Id":sessionId}:{}) }, body:JSON.stringify({ jsonrpc:"2.0", method:"notifications/initialized" }) });
+    await rpcCall("initialize", { protocolVersion:"2025-03-26", capabilities:{}, clientInfo:{ name:"learn-mcp-client", version:"4.0" } });
+    const sid = getSessionId();
+    await fetch(getProxy(), { method:"POST", headers:{ "Content-Type":"application/json", "Accept":"application/json, text/event-stream", ...(sid?{"Mcp-Session-Id":sid}:{}) }, body:JSON.stringify({ jsonrpc:"2.0", method:"notifications/initialized" }) });
     const r = await rpcCall("tools/list", {}); tools = r?.result?.tools || [];
+    // If server didn't return a session ID (stateless), set a placeholder so doSearch works
+    if (!sessions[activeProvider]) sessions[activeProvider] = "stateless";
+    activeTool = PROVIDERS[activeProvider].search;
     setConnected(true); renderTools(); btn.textContent = "LIVE"; btn.classList.add("connected");
     document.getElementById("searchBtn").disabled = false; document.getElementById("queryInput").focus();
   } catch(err) { addLog("err","init",{error:err.message}); btn.textContent = "RETRY"; btn.disabled = false; setConnected(false); }
 }
 
+function switchProvider(id) {
+  if (id === activeProvider) return;
+  activeProvider = id;
+  // Update button UI
+  document.querySelectorAll(".provider-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.prov === id);
+  });
+  // If already have a session for this provider, restore it
+  if (sessions[activeProvider]) {
+    activeTool = PROVIDERS[activeProvider].search;
+    setConnected(true);
+    // Re-discover tools
+    rpcCall("tools/list", {}).then(r => { tools = r?.result?.tools || []; renderTools(); });
+    document.getElementById("connectBtn").textContent = "LIVE";
+    document.getElementById("connectBtn").classList.add("connected");
+    document.getElementById("searchBtn").disabled = false;
+  } else {
+    setConnected(false); tools = [];
+    document.getElementById("connectBtn").textContent = "INIT";
+    document.getElementById("connectBtn").disabled = false;
+    document.getElementById("connectBtn").classList.remove("connected");
+    document.getElementById("searchBtn").disabled = true;
+    renderTools();
+  }
+  document.getElementById("queryInput").placeholder = `Search ${PROVIDERS[activeProvider].name}... ( / )`;
+  toast(`Switched to ${PROVIDERS[activeProvider].name}`);
+}
+
 async function doSearch() {
   const q = document.getElementById("queryInput").value.trim();
-  if (!q || !sessionId) return;
+  if (!q || !getSessionId()) return;
   const el = document.getElementById("results");
   el.innerHTML = '<div class="empty-state"><div class="spinner"></div> Querying...</div>';
   focusedResult = -1;
+  const prov = PROVIDERS[activeProvider];
   try {
-    const result = await rpcCall("tools/call", { name:activeTool, arguments:{ query:q } });
-    let parsed = [];
-    // Try structuredContent first (pre-parsed), then fall back to content[0].text
-    const sc = result?.result?.structuredContent?.results;
-    if (sc && sc.length) { parsed = sc; }
-    else {
-      const content = result?.result?.content || [];
-      for (const block of content) { if (block.type === "text") { try { const obj = JSON.parse(block.text); parsed = Array.isArray(obj) ? obj : (obj.results || [obj]); } catch { parsed = [{ title:"Result", content:block.text }]; } } }
+    // Build args based on provider
+    let callArgs;
+    if (activeProvider === "aws") {
+      callArgs = { search_phrase: q, topics: ["general", "reference_documentation"], limit: 10 };
+    } else if (activeTool === prov.code) {
+      callArgs = { query: q };
+    } else {
+      callArgs = { query: q };
     }
-    // Deduplicate: if multiple doc results share the same base URL, keep the one with most content
-    // Skip dedup for code samples (they legitimately share URLs)
-    const isCodeSamples = parsed[0] && parsed[0].codeSnippet;
-    if (!isCodeSamples) {
-      const seen = new Map();
-      parsed.forEach(item => {
-        const url = item.contentUrl || item.link || "";
-        const base = url.split("#")[0];
-        if (!seen.has(base)) seen.set(base, item);
-        else if ((item.content||"").length > (seen.get(base).content||"").length) seen.set(base, item);
-      });
-      parsed = [...seen.values()];
+    const result = await rpcCall("tools/call", { name: activeTool, arguments: callArgs });
+    let parsed = [];
+
+    if (activeProvider === "aws") {
+      // AWS returns various nested formats. Unwrap aggressively.
+      const c = result?.result?.content;
+      // Direct object: {result: [...]}
+      if (c && !Array.isArray(c) && c.result && Array.isArray(c.result)) { parsed = c.result; }
+      // Direct object: {content: {result: [...]}} (double nested)
+      else if (c && !Array.isArray(c) && c.content?.result && Array.isArray(c.content.result)) { parsed = c.content.result; }
+      // Standard MCP: [{type:"text", text:"{...}"}]
+      else if (Array.isArray(c)) {
+        for (const b of c) {
+          if (b.type==="text" && b.text) {
+            try {
+              const o = JSON.parse(b.text);
+              // Could be {result:[...]}, {content:{result:[...]}}, or just [...]
+              if (Array.isArray(o)) { parsed = o; }
+              else if (o.result && Array.isArray(o.result)) { parsed = o.result; }
+              else if (o.content?.result && Array.isArray(o.content.result)) { parsed = o.content.result; }
+              else if (o.results && Array.isArray(o.results)) { parsed = o.results; }
+              else { parsed = [o]; }
+            } catch { parsed = [{title:"Result", context:b.text}]; }
+          }
+        }
+      }
+      // Fallback
+      if (!parsed.length && c?.result) { parsed = Array.isArray(c.result) ? c.result : [{title:"Result",context:String(c.result)}]; }
+    } else {
+      // MS Learn format
+      const sc = result?.result?.structuredContent?.results;
+      if (sc && sc.length) { parsed = sc; }
+      else {
+        const content = result?.result?.content || [];
+        for (const block of content) { if (block.type === "text") { try { const obj = JSON.parse(block.text); parsed = Array.isArray(obj) ? obj : (obj.results || [obj]); } catch { parsed = [{ title:"Result", content:block.text }]; } } }
+      }
+      // Dedup MS Learn (skip for code samples)
+      const isCodeSamples = parsed[0] && parsed[0].codeSnippet;
+      if (!isCodeSamples) {
+        const seen = new Map();
+        parsed.forEach(item => { const url = item.contentUrl||item.link||""; const base = url.split("#")[0]; if (!seen.has(base)) seen.set(base, item); else if ((item.content||"").length > (seen.get(base).content||"").length) seen.set(base, item); });
+        parsed = [...seen.values()];
+      }
     }
     searchResults = parsed; renderResults(parsed, q);
   } catch(err) { el.innerHTML = `<div class="empty-state" style="color:var(--red);">${esc(err.message)}</div>`; }
@@ -578,7 +660,7 @@ function renderResults(items, query) {
   const el = document.getElementById("results");
   if (!items.length) { el.innerHTML = `<div class="empty-state"><p>No results for "${esc(query)}"</p></div>`; return; }
 
-  // Detect if these are code sample results (have codeSnippet field)
+  // Code sample results (MS Learn only)
   const isCodeSamples = items[0] && items[0].codeSnippet;
 
   if (isCodeSamples) {
@@ -600,7 +682,30 @@ function renderResults(items, query) {
         <div class="result-meta" style="margin-top:6px;"><span>${esc(truncUrl(url))}</span></div>
       </div>`;
     }).join("");
+  } else if (activeProvider === "aws") {
+    // AWS format: rank_order, title, context, url (or sop_name for SOPs)
+    el.innerHTML = items.map((item, i) => {
+      const title = item.title || "AWS Doc";
+      const desc = (item.context || "").replace(/\n+/g, " ").trim().slice(0, 250);
+      const url = item.url || "#";
+      const rank = item.rank_order;
+      const isSop = !!item.sop_name;
+      const onclick = isSop
+        ? `toast('SOP: ${escA(item.sop_name)} (use AWS CLI to execute)')`
+        : `openDoc('${escA(url)}','${escA(title)}')`;
+      return `<div class="result-card ${i===focusedResult?'focused':''}" onclick="${onclick}" data-idx="${i}">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div class="result-title" style="margin-bottom:0;">${esc(title)}</div>
+          <div style="display:flex;gap:4px;">
+            ${isSop?`<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#1a3a2a;color:var(--green);font-family:'JetBrains Mono',monospace;">SOP</span>`:''}
+            ${rank?`<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#332200;color:#ff9900;font-family:'JetBrains Mono',monospace;">#${rank}</span>`:''}
+          </div>
+        </div>
+        <div class="result-desc" style="margin-top:4px;">${esc(desc)}${desc.length>=250?'...':''}</div>
+        <div class="result-meta"><span>${isSop?esc('sop: '+item.sop_name):esc(truncUrl(url))}</span></div></div>`;
+    }).join("");
   } else {
+    // MS Learn doc results
     el.innerHTML = items.map((item, i) => {
       const title = item.title || item.name || "Untitled";
       const rawDesc = item.description || item.summary || item.snippet || item.content || "";
@@ -621,48 +726,119 @@ function renderResults(items, query) {
   lastSearchHtml = el.innerHTML;
 }
 
-// Check if a URL can be fetched via microsoft_docs_fetch (HTML docs only)
+// Check if a URL can be fetched via MCP (provider-aware)
 function isFetchableDoc(url) {
   try {
     const u = new URL(url);
-    // go.microsoft.com/fwlink redirects - could be PDFs, downloads, anything
-    if (u.hostname === "go.microsoft.com") return false;
-    // aka.ms short links - same problem
-    if (u.hostname === "aka.ms") return false;
-    // Binary file extensions
+    if (u.hostname === "go.microsoft.com" || u.hostname === "aka.ms") return false;
     if (/\.(pdf|docx|xlsx|pptx|zip|tar|gz|exe|msi|dmg|pkg|iso|csv|json|xml|yaml|yml)$/i.test(u.pathname)) return false;
-    // GitHub repos, not docs
     if (u.hostname === "github.com") return false;
-    // Only fetch from learn.microsoft.com and docs.microsoft.com
+    // MS Learn
     if (u.hostname === "learn.microsoft.com" || u.hostname === "docs.microsoft.com") return true;
-    // Other microsoft.com subdomains might work but are risky
     if (u.hostname.endsWith(".microsoft.com")) return true;
+    // AWS - docs, blogs, whitepapers, repost
+    if (u.hostname.endsWith("aws.amazon.com") || u.hostname === "docs.amplify.aws" || u.hostname === "repost.aws") return true;
     return false;
   } catch { return false; }
 }
 
 async function openDoc(url, title) {
-  // If URL isn't a fetchable doc page, open externally
   if (!isFetchableDoc(url)) { window.open(url, "_blank"); toast("Opened externally"); return; }
   if (docCache.has(url)) { const c = docCache.get(url); showDoc(c.markdown, c.title||title, url); return; }
   document.getElementById("results").innerHTML = '<div class="empty-state"><div class="spinner"></div> Fetching...</div>';
   try {
-    const result = await rpcCall("tools/call", { name:"microsoft_docs_fetch", arguments:{ url } });
-    let md = ""; for (const b of (result?.result?.content||[])) { if (b.type==="text") { try { const o=JSON.parse(b.text); md=o.content||o.markdown||o.text||b.text; } catch { md=b.text; } } }
-    // Detect if we got binary garbage back (PDF served from a .microsoft.com URL without .pdf extension)
+    const prov = PROVIDERS[activeProvider];
+    let fetchArgs, fetchTool;
+    // Auto-detect which provider can fetch this URL
+    if (url.includes("aws.amazon.com") || url.includes("amplify.aws") || url.includes("repost.aws")) {
+      fetchTool = "aws___read_documentation";
+      fetchArgs = { url, max_length: 15000 };
+      // Make sure we have an AWS session
+      if (!sessions.aws) { const prev = activeProvider; activeProvider = "aws"; await initSession(); activeProvider = prev; }
+      const prevProv = activeProvider; activeProvider = "aws";
+      var result = await rpcCall("tools/call", { name: fetchTool, arguments: fetchArgs });
+      activeProvider = prevProv;
+    } else {
+      fetchTool = prov.fetch;
+      fetchArgs = activeProvider === "aws" ? { url, max_length: 15000 } : { url };
+      var result = await rpcCall("tools/call", { name: fetchTool, arguments: fetchArgs });
+    }
+    let md = "";
+    // Parse doc content - handle various MCP response formats
+    const c = result?.result?.content;
+    // Direct object with result string (AWS direct): {result: "markdown"}
+    if (c && !Array.isArray(c) && typeof c.result === "string") { md = c.result; }
+    // Double nested (AWS via wrapper): {content: {result: "markdown"}}
+    else if (c && !Array.isArray(c) && typeof c.content?.result === "string") { md = c.content.result; }
+    // Standard MCP array: [{type:"text", text:"{...}"}]
+    else if (Array.isArray(c)) {
+      for (const b of c) {
+        if (b.type==="text" && b.text) {
+          try {
+            const o = JSON.parse(b.text);
+            // Try all known result key patterns
+            md = (typeof o.result === "string" ? o.result : null)
+              || (typeof o.content?.result === "string" ? o.content.result : null)
+              || o.content || o.markdown || o.text || b.text;
+          } catch { md = b.text; }
+        }
+      }
+    }
+    // Raw string
+    else if (typeof c === "string") { md = c; }
+
     if (md.startsWith("%PDF") || md.includes("\x00") || /^[^\x20-\x7E\r\n\t]{20}/.test(md.slice(0,100))) {
       window.open(url, "_blank"); toast("Binary file - opened externally"); return;
     }
     const titleMatch = md.match(/^#\s+(.+)$/m);
     const docTitle = titleMatch ? titleMatch[1] : title;
-    docCache.set(url, { markdown:md, title:docTitle }); pruneDocCache(); addHistory(url, docTitle); showDoc(md, docTitle, url);
+    // Track if AWS doc might be truncated (content near max_length)
+    const isTruncated = activeProvider === "aws" && md.length > 14000;
+    docCache.set(url, { markdown:md, title:docTitle, charOffset: md.length, truncated: isTruncated });
+    pruneDocCache(); addHistory(url, docTitle); showDoc(md, docTitle, url);
   } catch(err) { document.getElementById("results").innerHTML = `<div class="empty-state" style="color:var(--red);">${esc(err.message)}</div>`; }
+}
+
+async function loadMoreDoc(url, title) {
+  const cached = docCache.get(url);
+  if (!cached) return;
+  toast("Loading more...");
+  try {
+    const prevProv = activeProvider;
+    // Route to AWS if it's an AWS doc
+    if (url.includes("aws.amazon.com") || url.includes("amplify.aws") || url.includes("repost.aws")) {
+      activeProvider = "aws";
+      if (!sessions.aws) await initSession();
+    }
+    const result = await rpcCall("tools/call", { name: "aws___read_documentation", arguments: { url, max_length: 15000, start_index: cached.charOffset } });
+    activeProvider = prevProv;
+    let moreMd = "";
+    const c = result?.result?.content;
+    if (Array.isArray(c)) {
+      for (const b of c) { if (b.type==="text" && b.text) { try { const o=JSON.parse(b.text); moreMd=(typeof o.result==="string"?o.result:null)||(typeof o.content?.result==="string"?o.content.result:null)||b.text; } catch { moreMd=b.text; } } }
+    } else if (c && typeof c.result === "string") { moreMd = c.result; }
+    else if (c && typeof c.content?.result === "string") { moreMd = c.content.result; }
+    if (moreMd && moreMd.length > 50) {
+      cached.markdown += "\n\n" + moreMd;
+      cached.charOffset += moreMd.length;
+      cached.truncated = moreMd.length > 14000;
+      currentDocMd = cached.markdown;
+      showDoc(cached.markdown, cached.title, url);
+      toast(`Loaded ${moreMd.length.toLocaleString()} more chars`);
+    } else {
+      cached.truncated = false;
+      showDoc(cached.markdown, cached.title, url);
+      toast("End of document");
+    }
+  } catch(err) { toast("Load more failed: " + err.message); }
 }
 
 function showDoc(md, title, url) {
   currentDocUrl = url; currentDocMd = md;
   const el = document.getElementById("results");
   const bm = bookmarks.some(b => b.url === url);
+  const cached = docCache.get(url);
+  const showLoadMore = cached?.truncated;
   el.innerHTML = `<div class="doc-viewer">
     <div class="doc-toolbar">
       <button class="doc-btn" onclick="goBack()">← Back</button>
@@ -672,6 +848,7 @@ function showDoc(md, title, url) {
       <button class="doc-btn" onclick="window.open('${escA(url)}','_blank')">↗ Ext</button>
     </div>
     <div class="doc-content" id="docContent">${renderMarkdown(md)}</div>
+    ${showLoadMore?`<button class="doc-btn" style="margin-top:12px;width:100%;justify-content:center;padding:8px;color:var(--accent);" onclick="loadMoreDoc('${escA(url)}','${escA(title)}')">Load more content...</button>`:''}
   </div>`;
   const tab = tabs.find(t => t.id === activeTabId);
   if (tab && tab.type !== "search") { tab.title = title.slice(0,25); tab.url = url; renderTabs(); }
@@ -699,10 +876,11 @@ function renderHistory() { const el=document.getElementById("historyList"); if(!
 function toggleBookmark(url,title) { const i=bookmarks.findIndex(b=>b.url===url); if(i>=0)bookmarks.splice(i,1);else bookmarks.push({url,title}); saveBookmarks(); renderBookmarks(); if(currentDocUrl===url&&docCache.has(url)){const c=docCache.get(url);showDoc(c.markdown,c.title,url);} toast(i>=0?"Removed":"Bookmarked!"); }
 function renderBookmarks() { const el=document.getElementById("bookmarkList"); if(!bookmarks.length){el.innerHTML='<div style="color:var(--text-muted);font-size:9px;">None</div>';return;} el.innerHTML=bookmarks.map(b=>`<div class="tool-item" onclick="openDoc('${escA(b.url)}','${escA(b.title)}')"><div class="tool-name" style="font-size:9px;">★ ${esc(b.title.slice(0,28))}</div></div>`).join(""); }
 function exportMd(url) { const c=docCache.get(url); if(!c){toast("No doc");return;} navigator.clipboard.writeText(c.markdown).then(()=>toast("MD copied!")).catch(()=>toast("Failed")); }
-function renderTools() { const el=document.getElementById("toolList"); if(!tools.length)return; el.innerHTML=tools.map(t=>`<div class="tool-item ${t.name===activeTool?'active':''}" onclick="selectTool('${t.name}')"><div class="tool-name">${t.name.replace('microsoft_','')}</div></div>`).join(""); }
-function selectTool(name) { activeTool=name; renderTools(); document.getElementById("queryInput").placeholder=`Search ${name.replace('microsoft_','')}...`; toast(`Tool: ${name.replace('microsoft_','')}`); }
+function cleanToolName(n) { return n.replace('microsoft_','').replace('aws___','').replace(/_/g,' '); }
+function renderTools() { const el=document.getElementById("toolList"); if(!tools.length){el.innerHTML=`<div style="color:var(--text-muted);font-size:9px;">Connect ${PROVIDERS[activeProvider].name}</div>`;return;} el.innerHTML=tools.map(t=>`<div class="tool-item ${t.name===activeTool?'active':''}" onclick="selectTool('${t.name}')"><div class="tool-name">${cleanToolName(t.name)}</div></div>`).join(""); }
+function selectTool(name) { activeTool=name; renderTools(); document.getElementById("queryInput").placeholder=`Search ${cleanToolName(name)}...`; toast(`Tool: ${cleanToolName(name)}`); }
 function goBack() { if(lastSearchHtml)document.getElementById("results").innerHTML=lastSearchHtml; currentDocMd=""; document.getElementById("tocList").innerHTML=""; }
-function setConnected(s) { document.getElementById("statusDot").className="status-dot"+(s?" connected":""); document.getElementById("statusText").textContent=s?`session:${sessionId?.slice(0,8)}`:"disconnected"; }
+function setConnected(s) { document.getElementById("statusDot").className="status-dot"+(s?" connected":""); const sid=getSessionId(); document.getElementById("statusText").textContent=s?`${PROVIDERS[activeProvider].name} connected`:"disconnected"; }
 
 // ==================== COPY BUTTONS ====================
 function attachCopyButtons() { document.querySelectorAll(".doc-content pre").forEach(pre=>{const btn=document.createElement("button");btn.className="copy-btn";btn.textContent="COPY";btn.onclick=()=>{const code=pre.querySelector("code")?.textContent||pre.textContent;navigator.clipboard.writeText(code).then(()=>{btn.textContent="OK!";setTimeout(()=>btn.textContent="COPY",1200);});};pre.style.position="relative";pre.appendChild(btn);}); }
@@ -765,21 +943,21 @@ function renderMarkdown(md) {
 let paletteItems=[],paletteFocus=0;
 function openPalette(){buildPaletteItems();document.getElementById("paletteOverlay").classList.add("open");const i=document.getElementById("paletteInput");i.value="";i.focus();filterPalette();}
 function closePalette(){document.getElementById("paletteOverlay").classList.remove("open");}
-function buildPaletteItems(){paletteItems=[{icon:"🔍",text:"Search docs",hint:"focus search",action:()=>{closePalette();document.getElementById("queryInput").focus();}},{icon:"💬",text:"Toggle Ask panel",hint:"⌘J",action:()=>{closePalette();toggleChat();}},{icon:"🔧",text:"Docs search",hint:"microsoft_docs_search",action:()=>{closePalette();selectTool("microsoft_docs_search");}},{icon:"💻",text:"Code samples",hint:"microsoft_code_sample_search",action:()=>{closePalette();selectTool("microsoft_code_sample_search");}},{icon:"📑",text:"Toggle TOC",hint:"contents",action:()=>{closePalette();toggleToc();}},{icon:"➕",text:"New tab",hint:"tab",action:()=>{closePalette();newTab();}},...bookmarks.map(b=>({icon:"★",text:b.title,hint:"bookmark",action:()=>{closePalette();openDoc(b.url,b.title);}})),...history.slice(0,12).map(h=>({icon:"↩",text:h.title,hint:"history",action:()=>{closePalette();openDoc(h.url,h.title);}})),];}
+function buildPaletteItems(){const p=PROVIDERS[activeProvider];paletteItems=[{icon:"🔍",text:"Search docs",hint:"focus search",action:()=>{closePalette();document.getElementById("queryInput").focus();}},{icon:"💬",text:"Toggle Ask panel",hint:"⌘J",action:()=>{closePalette();toggleChat();}},{icon:"🌐",text:"Switch to MS Learn",hint:"provider",action:()=>{closePalette();switchProvider("mslearn");}},{icon:"☁",text:"Switch to AWS",hint:"provider",action:()=>{closePalette();switchProvider("aws");}},{icon:"🔧",text:`${p.name} docs search`,hint:p.search,action:()=>{closePalette();selectTool(p.search);}},{icon:"📑",text:"Toggle TOC",hint:"contents",action:()=>{closePalette();toggleToc();}},{icon:"➕",text:"New tab",hint:"tab",action:()=>{closePalette();newTab();}}];if(p.code)paletteItems.splice(6,0,{icon:"💻",text:"Code samples",hint:p.code,action:()=>{closePalette();selectTool(p.code);}});paletteItems.push(...bookmarks.map(b=>({icon:"★",text:b.title,hint:"bookmark",action:()=>{closePalette();openDoc(b.url,b.title);}})),...history.slice(0,12).map(h=>({icon:"↩",text:h.title,hint:"history",action:()=>{closePalette();openDoc(h.url,h.title);}})));}
 function filterPalette(){const q=document.getElementById("paletteInput").value.toLowerCase();const f=q?paletteItems.filter(i=>i.text.toLowerCase().includes(q)||i.hint.toLowerCase().includes(q)):paletteItems;paletteFocus=0;const el=document.getElementById("paletteResults");if(!f.length){el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">No matches</div>';return;}el.innerHTML=f.map((item,i)=>`<div class="palette-item ${i===paletteFocus?'focused':''}" onclick="execPalette(${i})" data-idx="${i}"><span class="palette-icon">${item.icon}</span><span class="palette-text">${esc(item.text)}</span><span class="palette-hint">${esc(item.hint)}</span></div>`).join("");}
 function execPalette(idx){const q=document.getElementById("paletteInput").value.toLowerCase();const f=q?paletteItems.filter(i=>i.text.toLowerCase().includes(q)||i.hint.toLowerCase().includes(q)):paletteItems;if(f[idx])f[idx].action();}
 function handlePaletteKey(e){const items=document.querySelectorAll(".palette-item");if(e.key==="Escape"){closePalette();e.preventDefault();}else if(e.key==="ArrowDown"){paletteFocus=Math.min(paletteFocus+1,items.length-1);items.forEach((el,i)=>el.classList.toggle("focused",i===paletteFocus));e.preventDefault();}else if(e.key==="ArrowUp"){paletteFocus=Math.max(paletteFocus-1,0);items.forEach((el,i)=>el.classList.toggle("focused",i===paletteFocus));e.preventDefault();}else if(e.key==="Enter"){execPalette(paletteFocus);e.preventDefault();}}
 
 // ==================== KEYBOARD ====================
 function handleSearchKey(e){if(e.key==="Enter")doSearch();else if(e.key==="ArrowDown"&&searchResults.length){e.preventDefault();focusedResult=0;highlightResult();}else if(e.key==="Escape")e.target.blur();}
-document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="k"){e.preventDefault();openPalette();return;}if((e.metaKey||e.ctrlKey)&&e.key==="j"){e.preventDefault();toggleChat();return;}if(e.key==="Escape"&&document.getElementById("paletteOverlay").classList.contains("open")){closePalette();return;}if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA")return;if(e.key==="/"){e.preventDefault();document.getElementById("queryInput").focus();}else if(e.key==="Escape")goBack();else if(e.key==="ArrowDown"&&searchResults.length){e.preventDefault();focusedResult=Math.min(focusedResult+1,searchResults.length-1);highlightResult();}else if(e.key==="ArrowUp"&&searchResults.length){e.preventDefault();focusedResult=Math.max(focusedResult-1,0);highlightResult();}else if(e.key==="Enter"&&focusedResult>=0){e.preventDefault();const item=searchResults[focusedResult];const url=item.contentUrl||item.url||item.link||"#";const base=url.split("#")[0];openDoc(base.startsWith("/")?("https://learn.microsoft.com"+base):base,item.title||item.description||"Doc");}});
+document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="k"){e.preventDefault();openPalette();return;}if((e.metaKey||e.ctrlKey)&&e.key==="j"){e.preventDefault();toggleChat();return;}if(e.key==="Escape"&&document.getElementById("paletteOverlay").classList.contains("open")){closePalette();return;}if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA")return;if(e.key==="/"){e.preventDefault();document.getElementById("queryInput").focus();}else if(e.key==="Escape")goBack();else if(e.key==="ArrowDown"&&searchResults.length){e.preventDefault();focusedResult=Math.min(focusedResult+1,searchResults.length-1);highlightResult();}else if(e.key==="ArrowUp"&&searchResults.length){e.preventDefault();focusedResult=Math.max(focusedResult-1,0);highlightResult();}else if(e.key==="Enter"&&focusedResult>=0){e.preventDefault();const item=searchResults[focusedResult];const url=item.contentUrl||item.url||item.link||"#";const base=url.split("#")[0];openDoc(base.startsWith("/")?(activeProvider==="aws"?"https://docs.aws.amazon.com"+base:"https://learn.microsoft.com"+base):base,item.title||item.description||"Doc");}});
 function highlightResult(){document.querySelectorAll(".result-card").forEach((el,i)=>el.classList.toggle("focused",i===focusedResult));const f=document.querySelector(".result-card.focused");if(f)f.scrollIntoView({block:"nearest"});}
 
 // ==================== UTIL ====================
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function escA(s){return String(s).replace(/&/g,"&amp;").replace(/'/g,"&#39;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function truncUrl(u){try{return new URL(u).pathname.slice(0,45);}catch{return u.slice(0,45);}}
-function resolveUrl(src){if(src.startsWith("http"))return src;if(src.startsWith("/"))return"https://learn.microsoft.com"+src;if(currentDocUrl){try{return currentDocUrl.replace(/\/[^/]*$/,"/")+src;}catch{}}return"https://learn.microsoft.com/"+src;}
+function resolveUrl(src){if(src.startsWith("http"))return src;if(src.startsWith("/")){if(currentDocUrl){try{const u=new URL(currentDocUrl);return u.origin+src;}catch{}}return activeProvider==="aws"?"https://docs.aws.amazon.com"+src:"https://learn.microsoft.com"+src;}if(currentDocUrl){try{return currentDocUrl.replace(/\/[^/]*$/,"/")+src;}catch{}}return src;}
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2000);}
 function toggleTheme(){
   document.body.classList.toggle("light");
