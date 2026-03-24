@@ -691,7 +691,7 @@ function renderResults(items, query) {
       const rank = item.rank_order;
       const isSop = !!item.sop_name;
       const onclick = isSop
-        ? `toast('SOP: ${escA(item.sop_name)} (use AWS CLI to execute)')`
+        ? `openSop('${escA(item.sop_name)}','${escA(title)}')`
         : `openDoc('${escA(url)}','${escA(title)}')`;
       return `<div class="result-card ${i===focusedResult?'focused':''}" onclick="${onclick}" data-idx="${i}">
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -790,13 +790,17 @@ async function openDoc(url, title) {
     if (md.startsWith("%PDF") || md.includes("\x00") || /^[^\x20-\x7E\r\n\t]{20}/.test(md.slice(0,100))) {
       window.open(url, "_blank"); toast("Binary file - opened externally"); return;
     }
+    if (!md || md.trim().length < 20) {
+      document.getElementById("results").innerHTML = `<div class="empty-state"><p>This doc couldn't be fetched via MCP.</p><button class="doc-btn" style="margin-top:8px;" onclick="window.open('${escA(url)}','_blank')">Open in browser ↗</button><br><button class="doc-btn" style="margin-top:6px;" onclick="goBack()">← Back to results</button></div>`;
+      return;
+    }
     const titleMatch = md.match(/^#\s+(.+)$/m);
     const docTitle = titleMatch ? titleMatch[1] : title;
     // Track if AWS doc might be truncated (content near max_length)
     const isTruncated = activeProvider === "aws" && md.length > 14000;
     docCache.set(url, { markdown:md, title:docTitle, charOffset: md.length, truncated: isTruncated });
     pruneDocCache(); addHistory(url, docTitle); showDoc(md, docTitle, url);
-  } catch(err) { document.getElementById("results").innerHTML = `<div class="empty-state" style="color:var(--red);">${esc(err.message)}</div>`; }
+  } catch(err) { document.getElementById("results").innerHTML = `<div class="empty-state"><p style="color:var(--red);">${esc(err.message)}</p><button class="doc-btn" style="margin-top:8px;" onclick="window.open('${escA(url)}','_blank')">Open in browser ↗</button><br><button class="doc-btn" style="margin-top:6px;" onclick="goBack()">← Back to results</button></div>`; }
 }
 
 async function loadMoreDoc(url, title) {
@@ -833,6 +837,41 @@ async function loadMoreDoc(url, title) {
   } catch(err) { toast("Load more failed: " + err.message); }
 }
 
+async function openSop(sopName, title) {
+  document.getElementById("results").innerHTML = '<div class="empty-state"><div class="spinner"></div> Loading SOP...</div>';
+  try {
+    // Ensure AWS session
+    const prevProv = activeProvider;
+    activeProvider = "aws";
+    if (!sessions.aws) await initSession();
+    const result = await rpcCall("tools/call", { name: "aws___retrieve_agent_sop", arguments: { sop_name: sopName } });
+    activeProvider = prevProv;
+    let md = "";
+    const c = result?.result?.content;
+    // Try sop_content field first (direct), then standard MCP unwrapping
+    if (c && typeof c.sop_content === "string") { md = c.sop_content; }
+    else if (c && typeof c === "string") { md = c; }
+    else if (Array.isArray(c)) {
+      for (const b of c) {
+        if (b.type === "text" && b.text) {
+          try {
+            const o = JSON.parse(b.text);
+            md = o.sop_content || o.content?.sop_content || (typeof o.result === "string" ? o.result : null) || (typeof o.content?.result === "string" ? o.content.result : null) || o.content || o.text || b.text;
+          } catch { md = b.text; }
+        }
+      }
+    }
+    if (!md) { toast("SOP returned empty"); return; }
+    const sopUrl = "sop://" + sopName;
+    const docTitle = "SOP: " + (title || sopName);
+    docCache.set(sopUrl, { markdown: md, title: docTitle, truncated: false });
+    addHistory(sopUrl, docTitle);
+    showDoc(md, docTitle, sopUrl);
+  } catch(err) {
+    document.getElementById("results").innerHTML = `<div class="empty-state" style="color:var(--red);">SOP fetch failed: ${esc(err.message)}</div>`;
+  }
+}
+
 function showDoc(md, title, url) {
   currentDocUrl = url; currentDocMd = md;
   const el = document.getElementById("results");
@@ -845,7 +884,7 @@ function showDoc(md, title, url) {
       <button class="doc-btn" onclick="toggleBookmark('${escA(url)}','${escA(title)}')">${bm?'★':'☆'} Bookmark</button>
       <button class="doc-btn" onclick="exportMd('${escA(url)}')">📋 MD</button>
       <button class="doc-btn" onclick="openInNewTab('${escA(url)}','${escA(title)}')">⧉ Tab</button>
-      <button class="doc-btn" onclick="window.open('${escA(url)}','_blank')">↗ Ext</button>
+      ${url.startsWith('sop://')?'':`<button class="doc-btn" onclick="window.open('${escA(url)}','_blank')">↗ Ext</button>`}
     </div>
     <div class="doc-content" id="docContent">${renderMarkdown(md)}</div>
     ${showLoadMore?`<button class="doc-btn" style="margin-top:12px;width:100%;justify-content:center;padding:8px;color:var(--accent);" onclick="loadMoreDoc('${escA(url)}','${escA(title)}')">Load more content...</button>`:''}
@@ -908,6 +947,8 @@ function renderMarkdown(md) {
   if(!md)return'<p style="color:var(--text-muted);">Empty.</p>';
   // Normalize line endings
   md = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Convert raw HTML <pre><code>...</code></pre> to fenced code blocks before processing
+  md = md.replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/gi, (_, c) => "```\n" + c.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"') + "\n```");
   // Fenced code blocks: handle optional lang with spaces, optional trailing whitespace
   let h = md.replace(/```[ \t]*[\w#+-]*[ \t]*\n([\s\S]*?)```/g, (_,c) => `<pre><code>${esc(c.trim())}</code></pre>`);
   // Indented code blocks: 4+ spaces or 1 tab at line start, consecutive lines
@@ -922,6 +963,7 @@ function renderMarkdown(md) {
     return tbl || block;
   });
   h = h.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,(_,a,s)=>`<img src="${resolveUrl(s)}" alt="${esc(a)}">`)
+    .replace(/^###### (.+)$/gm,'<h6>$1</h6>').replace(/^##### (.+)$/gm,'<h5>$1</h5>').replace(/^#### (.+)$/gm,'<h4>$1</h4>')
     .replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^# (.+)$/gm,'<h1>$1</h1>')
     .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>')
     .replace(/`([^`]+)`/g,'<code>$1</code>')
@@ -935,7 +977,7 @@ function renderMarkdown(md) {
   h = h.replace(/^[-*] (.+)$/gm,'<uli>$1</uli>').replace(/^\d+\. (.+)$/gm,'<oli>$1</oli>');
   h = h.replace(/((?:<uli>.*<\/uli>\n?)+)/g, (m) => '<ul>' + m.replace(/<\/?uli>/g, (t) => t.replace('uli','li')) + '</ul>');
   h = h.replace(/((?:<oli>.*<\/oli>\n?)+)/g, (m) => '<ol>' + m.replace(/<\/?oli>/g, (t) => t.replace('oli','li')) + '</ol>');
-  h=h.split('\n\n').map(b=>{b=b.trim();if(!b)return'';if(/^<(h[1-3]|pre|ul|ol|blockquote|img|table)/.test(b))return b;return`<p>${b.replace(/\n/g,'<br>')}</p>`;}).join('\n');
+  h=h.split('\n\n').map(b=>{b=b.trim();if(!b)return'';if(/^<(h[1-6]|pre|ul|ol|blockquote|img|table)/.test(b))return b;return`<p>${b.replace(/\n/g,'<br>')}</p>`;}).join('\n');
   return h;
 }
 
