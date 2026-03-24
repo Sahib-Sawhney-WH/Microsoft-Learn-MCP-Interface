@@ -1,51 +1,63 @@
 # LEARN:MCP
 
-**A zero-LLM Microsoft Learn documentation browser built entirely on the Model Context Protocol.**
+**A zero-LLM, multi-cloud documentation browser built on the Model Context Protocol.**
 
-Search, read, and ask questions about Microsoft Learn docs - all from a single HTML file. No AI models, no API keys, no backend, no build step. Just MCP over JSON-RPC 2.0 through a Cloudflare Worker CORS proxy.
+Search, read, and ask questions about Microsoft Learn and AWS documentation - all from a single HTML file. No AI models, no API keys, no backend, no build step. Just MCP over JSON-RPC 2.0 through a Cloudflare Worker CORS proxy.
 
 ```
 Browser  -->  Cloudflare Worker  -->  Microsoft Learn MCP Server
-  HTML          (CORS proxy)           learn.microsoft.com/api/mcp
+  HTML         (CORS proxy)          learn.microsoft.com/api/mcp
+  976 lines     /mslearn
+                /aws             -->  AWS Knowledge MCP Server
+                                      knowledge-mcp.global.api.aws
 ```
 
 ## What This Is
 
-A 772-line single HTML file that acts as a full MCP client, talking directly to Microsoft's Learn documentation MCP server. It includes:
+A 976-line single HTML file that acts as a full MCP client, talking directly to both Microsoft's Learn and AWS's Knowledge MCP servers. It includes:
 
-- **Doc Search** - query `microsoft_docs_search` and browse results
+- **Multi-Provider** - toggle between Microsoft Learn and AWS docs from the header
+- **Doc Search** - query `microsoft_docs_search` or `aws___search_documentation`
 - **Code Sample Search** - query `microsoft_code_sample_search` with syntax-highlighted previews
-- **Full Doc Viewer** - fetch and render complete documentation pages via `microsoft_docs_fetch`
+- **Full Doc Viewer** - fetch and render complete pages via `microsoft_docs_fetch` or `aws___read_documentation`
 - **Extractive Q&A** - ask questions about any doc using BM25 section matching (no LLM)
 - **Auto-Summarizer** - TF-IDF extractive summarization runs on every doc load (no LLM)
 - **Tabs, TOC, Bookmarks, History** - full browsing experience with keyboard shortcuts
-- **Command Palette** - `Ctrl+K` to search commands, history, and bookmarks
+- **Command Palette** - `Ctrl+K` to search commands, history, bookmarks, and switch providers
 - **Dark/Light Mode** - toggle with persisted preference
 - **Session Auto-Reconnect** - detects 401/404/410 and re-initializes automatically
+- **AWS Doc Pagination** - "Load more" for long AWS docs using `start_index`
+- **AWS SOP Detection** - recognizes Standard Operating Procedure results with special badges
+- **Smart Link Routing** - PDFs, `go.microsoft.com/fwlink` redirects, and GitHub links open externally
 
-All state (bookmarks, history, theme) persists via localStorage. Doc cache uses LRU eviction at 50 entries.
+All state (bookmarks, history, theme) persists via localStorage. Doc cache uses LRU eviction at 50 entries. Separate MCP sessions per provider.
 
 ## Why
 
-MCP is a protocol. It doesn't need an LLM to work. This project proves it by building a fully functional documentation browser where the only "intelligence" is ~80 lines of TF-IDF and BM25 - algorithms from the 1970s.
+MCP is a protocol. It doesn't need an LLM to work. This project proves it by building a fully functional multi-cloud documentation browser where the only "intelligence" is ~120 lines of TF-IDF and BM25 - algorithms from the 1970s.
 
 ## Quick Start
 
 ### 1. Deploy the CORS Proxy (Cloudflare Worker)
 
-The Microsoft Learn MCP endpoint doesn't set CORS headers, so browsers can't call it directly. A tiny Cloudflare Worker fixes this. Free tier covers 100,000 requests/day.
+The MCP endpoints don't set CORS headers, so browsers can't call them directly. A tiny Cloudflare Worker fixes this. Free tier covers 100,000 requests/day - no credit card, no auto-charges, requests just stop if you exceed the limit.
 
 ```bash
-# Create the project
-mkdir mcp-proxy && cd mcp-proxy
-mkdir src
+mkdir mcp-proxy && cd mcp-proxy && mkdir src
 ```
 
 Create `src/index.js`:
 
 ```javascript
+const TARGETS = {
+  "/mslearn": "https://learn.microsoft.com/api/mcp",
+  "/aws": "https://knowledge-mcp.global.api.aws",
+};
+
 export default {
   async fetch(request) {
+    const url = new URL(request.url);
+
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
@@ -56,20 +68,22 @@ export default {
       });
     }
 
+    const target = TARGETS[url.pathname];
+    if (!target) {
+      return new Response(JSON.stringify({ error: "Use /mslearn or /aws" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+
     const headers = {
       "Content-Type": "application/json",
       "Accept": "application/json, text/event-stream",
     };
-
     const sessionId = request.headers.get("Mcp-Session-Id");
     if (sessionId) headers["Mcp-Session-Id"] = sessionId;
 
-    const res = await fetch("https://learn.microsoft.com/api/mcp", {
-      method: "POST",
-      headers,
-      body: request.body,
-    });
-
+    const res = await fetch(target, { method: "POST", headers, body: request.body });
     const response = new Response(res.body, res);
     response.headers.set("Access-Control-Allow-Origin", "*");
     response.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -95,13 +109,7 @@ Create `package.json`:
   "name": "mcp-proxy",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
-  },
-  "devDependencies": {
-    "wrangler": "^3.0.0"
-  }
+  "devDependencies": { "wrangler": "^3.0.0" }
 }
 ```
 
@@ -113,7 +121,7 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-You'll get a URL like `https://mcp-proxy.YOUR_SUBDOMAIN.workers.dev`. That's your proxy.
+You'll get a URL like `https://mcp-proxy.YOUR_SUBDOMAIN.workers.dev`.
 
 ### 2. Configure the Client
 
@@ -124,120 +132,64 @@ Find:    YOUR_WORKER_URL_HERE
 Replace: https://mcp-proxy.YOUR_SUBDOMAIN.workers.dev
 ```
 
-There are two occurrences - the `PROXY` constant in the JS and the sidebar footer display text.
-
 ### 3. Open and Go
 
-Open `ms-learn-mcp-client.html` in any browser. Click **INIT** to handshake with the MCP server. Once the status dot goes green, you're live.
-
-Or use the automated setup script:
-
-```bash
-chmod +x setup-learn-mcp.sh
-./setup-learn-mcp.sh
-```
-
-The script handles everything: project creation, Cloudflare login, deploy, and auto-patches the HTML with your worker URL.
+Open the HTML file in any browser. Click **INIT**. Switch between MS Learn and AWS using the header toggle.
 
 ## Keyboard Shortcuts
 
 | Key | Action |
 |---|---|
-| `/` | Focus search input |
-| `Enter` | Search / open focused result |
-| `Arrow Up/Down` | Navigate search results |
-| `Escape` | Go back to results |
-| `Ctrl+K` / `Cmd+K` | Open command palette |
+| `/` | Focus search |
+| `Enter` | Search / open result |
+| `Arrow Up/Down` | Navigate results |
+| `Escape` | Go back |
+| `Ctrl+K` / `Cmd+K` | Command palette |
 | `Ctrl+J` / `Cmd+J` | Toggle ASK panel |
 
 ## How the NLP Works
 
 No neural networks. No embeddings. No API calls. Just classical information retrieval.
 
-**Summarizer (TF-IDF, section-aware)**
+**Summarizer** - TF-IDF scoring with section-aware diversity. Picks the best sentence from each section for coverage, re-sorts by original position for coherent reading.
 
-1. Parse the doc into sections by headings
-2. Extract clean sentences (strip markdown, images, boilerplate, tab selectors)
-3. Score each sentence: term frequency * inverse document frequency
-4. Boost first sentence of each section (position prior)
-5. Diversify: pick top sentence from each section before filling globally
-6. Re-sort by original position for coherent reading order
+**Q&A** - BM25 section matching with 5x heading bonus per query token match, 1.3x code bonus for "how do I" questions. Returns best section with keyword highlighting and inline code.
 
-**Q&A (BM25 + heading match)**
+**MS Learn-specific** - strips boilerplate, merges language tab headers into parent sections, filters noise sections.
 
-1. Parse doc into sections, preserving code blocks
-2. Tokenize the question (Azure-aware: keeps short terms like `az`, `acr`, `aks`, `cli`)
-3. Score each section using BM25 (same algorithm as Elasticsearch)
-4. Apply heading bonus: 5x multiplier per query token found in section heading
-5. Apply code bonus: 1.3x for "how do I" questions when section has code
-6. Return best section with keyword highlighting and inline code preview
+**Cloud-aware tokenizer** - keeps short terms: `az`, `acr`, `aks`, `cli`, `mcp`, `sdk`, `vpc`, `ec2`, `iam`, `api`, etc.
 
-**Boilerplate filtering**
+## MCP Tools Used
 
-MS Learn docs contain recurring patterns that pollute results: "Having issues? Let us know on GitHub", "Was this page helpful?", tab selectors like `* [Bash](#tabpanel...)`, and sections like "Feedback" and "Additional Resources". These are stripped before any NLP processing.
+### Microsoft Learn
+- `microsoft_docs_search` - search documentation
+- `microsoft_docs_fetch` - fetch full doc pages
+- `microsoft_code_sample_search` - find code snippets
 
-**Tab header merging**
+### AWS Knowledge
+- `aws___search_documentation` - search docs, blogs, whitepapers
+- `aws___read_documentation` - fetch pages with `start_index` pagination
+- `aws___list_regions` - list AWS regions
+- `aws___recommend` - related content recommendations
+- `aws___retrieve_agent_sop` - Standard Operating Procedures
 
-`### **Bash**` and `### **PowerShell**` headings in MS Learn docs are language tab selectors, not real sections. They're merged into their parent section so "Deploy your image" stays as one coherent section instead of fragmenting into six tiny pieces.
+## The Cost
 
-## Architecture
+| Component | Cost | Limit |
+|---|---|---|
+| Cloudflare Worker | $0 | 100,000 requests/day |
+| MS Learn MCP | $0 | Public endpoint |
+| AWS Knowledge MCP | $0 | Public endpoint |
+| LLM API calls | $0 | There are none |
 
-```
-ms-learn-mcp-client.html     Single-file browser client (772 lines)
-  |
-  |-- MCP Client              JSON-RPC 2.0 over Streamable HTTP
-  |-- NLP Engine              TF-IDF summarizer + BM25 Q&A (~120 lines)
-  |-- Markdown Renderer       Tables, code blocks, images, lists, blockquotes
-  |-- Tab Manager             Multi-doc browsing with cached content
-  |-- Command Palette         Fuzzy search across commands, history, bookmarks
-  |-- Chat Panel              Extractive Q&A with follow-up chips
-  |
-  v
-Cloudflare Worker             CORS proxy (30 lines)
-  |
-  v
-learn.microsoft.com/api/mcp   Microsoft Learn MCP Server
-  |-- microsoft_docs_search
-  |-- microsoft_docs_fetch
-  |-- microsoft_code_sample_search
-```
+Exceed 100k/day and Cloudflare just stops serving. No surprise charges. No credit card needed.
 
-## MCP Protocol Flow
+## Adding More MCP Servers
 
-```
-1. POST initialize         { protocolVersion, capabilities, clientInfo }
-2. POST notifications/initialized    (no response expected)
-3. POST tools/list         -> returns available tools
-4. POST tools/call         { name: "microsoft_docs_search", arguments: { query } }
-5. Parse SSE or JSON response, extract result.content[0].text
-```
-
-Session is maintained via `Mcp-Session-Id` header. If the session dies (401/404/410), the client auto-reconnects and retries.
-
-## What it Doesn't Do
-
-- No authentication required
-- No data leaves your browser (except MCP queries to Microsoft via the proxy)
-- No telemetry, analytics, or tracking
-- No LLM calls anywhere in the stack
-- No build step, no dependencies, no node_modules
-
-## Adapting for Other MCP Servers
-
-The proxy and client pattern works with any MCP server that supports Streamable HTTP transport. To point at a different server:
-
-1. Change the target URL in the Cloudflare Worker (`learn.microsoft.com/api/mcp` to your server)
-2. Update the tool names in the client JS (`microsoft_docs_search` etc.)
-3. Adjust the response parsing if the server returns different field names
-
-## Tech Stack
-
-- **Client**: Vanilla HTML/CSS/JS, IBM Plex Sans + JetBrains Mono
-- **Proxy**: Cloudflare Workers (free tier)
-- **Protocol**: MCP (Model Context Protocol) over JSON-RPC 2.0
-- **NLP**: TF-IDF, BM25 (in-browser, ~120 lines)
-- **Storage**: localStorage for persistence, in-memory LRU cache for docs
-- **Cost**: $0/month
+1. Add a route in the Worker: `"/newprovider": "https://server.example.com/mcp"`
+2. Add a provider config in the HTML's `PROVIDERS` object
+3. Add a toggle button in the header
+4. Handle response format differences in `doSearch` and `openDoc`
 
 ## License
 
